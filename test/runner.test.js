@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { sandbox, until } = require('./helpers');
+const { spawnSync } = require('node:child_process');
 
 test('clean-copy task completes and public defaults disable optional services', async (t) => {
   const app = await sandbox(t);
@@ -43,4 +44,25 @@ test('Claude permission denials stop for the user even if the agent reports DONE
   const created = await app.api('/api/tasks', { prompt: 'Small task' });
   const task = await until(async () => (await app.api('/api/tasks/' + created.body.id)).body, (r) => r.status === 'blocked');
   assert.match(task.lastEvent.text, /permission or sandbox/);
+});
+
+test('a second server exits with a useful port conflict message', async (t) => {
+  const app = await sandbox(t);
+  await app.start();
+  const result = spawnSync(process.execPath, ['server.js'], { cwd: app.root,
+    env: { ...process.env, KURO_CONFIG: path.join(app.root, 'config.json'), KURO_DATA_DIR: path.join(app.root, 'other-data') }, encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /already used.*Change "port"/);
+});
+
+test('corrupt persisted tasks stop startup without overwriting the file', async (t) => {
+  const app = await sandbox(t);
+  const data = path.join(app.root, 'data');
+  fs.mkdirSync(data);
+  fs.writeFileSync(path.join(data, 'tasks.json'), '{corrupt');
+  const result = spawnSync(process.execPath, ['server.js'], { cwd: app.root,
+    env: { ...process.env, KURO_CONFIG: path.join(app.root, 'config.json'), KURO_DATA_DIR: data }, encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Restore a backup/);
+  assert.equal(fs.readFileSync(path.join(data, 'tasks.json'), 'utf8'), '{corrupt');
 });
