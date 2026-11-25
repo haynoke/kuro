@@ -15,6 +15,7 @@ test('localhost boundary rejects DNS rebinding, non-loopback, cross-origin and h
   for (const options of [{ host: 'evil.example:8790' }, { address: '100.64.0.1' }, { headers: { origin: 'https://evil.example' } }, { method: 'POST' }]) assert.equal(request(access, options).status, 403);
   assert.equal(request(access, { method: 'POST', headers: { 'x-task-runner': '1', origin: 'http://localhost:8790' } }).allowed, true);
   assert.equal(request(access, { method: 'DELETE' }).status, 405);
+  assert.equal(request(access, { headers: { 'x-forwarded-for': '100.64.0.1' } }).status, 403);
 });
 
 test('remote mode fails closed and authenticates every resource, including localhost', () => {
