@@ -242,9 +242,11 @@ function childEnv(acc) {
   // Drop variables from whatever launched this server (for example a Claude
   // desktop session), so the workers start like a normal terminal would.
   for (const k of Object.keys(env)) {
-    if (/^CLAUDE/i.test(k) || k === 'ANTHROPIC_BASE_URL') delete env[k];
+    if (/^CLAUDE/i.test(k) || k === 'ANTHROPIC_BASE_URL' || k === 'KURO_AUTH_TOKEN') delete env[k];
   }
-  return { ...env, ...(acc.env || {}) };
+  const result = { ...env, ...(acc.env || {}) };
+  delete result.KURO_AUTH_TOKEN;
+  return result;
 }
 
 // Use the installed CLI, or an explicit path, without guessing from personal settings.
