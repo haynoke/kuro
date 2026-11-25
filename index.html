@@ -586,10 +586,10 @@ function span(ms) {
 }
 function greeting() {
   const h = new Date().getHours();
-  if (h >= 5 && h < 12) return 'good morning.';
-  if (h >= 12 && h < 17) return 'good afternoon.';
-  if (h >= 17 && h < 22) return 'good evening.';
-  return 'late night.';
+  if (h >= 5 && h < 12) return 'good morning';
+  if (h >= 12 && h < 17) return 'good afternoon';
+  if (h >= 17 && h < 22) return 'good evening';
+  return 'late night';
 }
 
 // ---------- routing ----------
@@ -753,7 +753,7 @@ function renderSide() {
   const running = state.tasks.filter((t) => t.status === 'running').length;
   const r = route;
   $('#side').innerHTML = `
-    <div class="brand"><a class="wordmark" href="#/">${esc(state.name.toLowerCase())}.</a>
+    <div class="brand"><a class="wordmark" href="#/">${esc(state.name.toLowerCase())}</a>
       <button class="iconbtn" data-act="new-chat" title="New chat" aria-label="New chat">${icon('compose')}</button></div>
     <a class="nav-item ${r.name === 'home' ? 'on' : ''}" href="#/">${icon('home')}Home</a>
     <a class="nav-item ${r.name === 'tasks' || r.name === 'task' ? 'on' : ''}" href="#/tasks">${icon('tasks')}Tasks${running ? `<span class="count num">${running} running</span>` : ''}</a>
@@ -771,7 +771,7 @@ function renderSide() {
 
 function renderTop() {
   const r = route;
-  let left = `<a class="wordmark" href="#/">${esc(state.name.toLowerCase())}.</a>`;
+  let left = `<a class="wordmark" href="#/">${esc(state.name.toLowerCase())}</a>`;
   let mid = '';
   let right = `<button class="iconbtn" data-act="new-chat" aria-label="New chat">${icon('compose')}</button>`;
   if (r.name !== 'home') {
@@ -882,14 +882,14 @@ function renderChat() {
       out = (imgs ? `<div class="msg-imgs${cls}">${imgs}</div>` : '') + (m.text ? `<div class="umsg${cls}"><div class="msg user">${esc(m.text)}</div><button class="speak copy" data-act="copy" aria-label="Copy message">${icon('copy')}<span>Copy</span></button></div>` : '');
     }
     else if (m.role === 'assistant') {
-      const head = prev !== 'assistant' && prev !== 'tool' && prev !== 'image' ? `<div class="who">${esc(state.name.toLowerCase())}.<time>${clock(m.t)}</time></div>` : '';
+      const head = prev !== 'assistant' && prev !== 'tool' && prev !== 'image' ? `<div class="who">${esc(state.name.toLowerCase())}<time>${clock(m.t)}</time></div>` : '';
       out = `<div class="msg kuro${cls}">${head}${md(m.text)}${canSpeak ? `<button class="speak${speakingId === m.id ? ' on' : ''}" data-act="speak" data-id="${m.id}" aria-label="Read aloud">${icon(speakingId === m.id ? 'stop' : 'speaker')}${speakingId === m.id ? 'Stop' : 'Read aloud'}</button>` : ''}</div>`;
     } else if (m.role === 'tool') {
       const name = m.text.split('(')[0];
       // Show only the first argument (the folder, task or text); the rest is noise on a phone.
       const args = m.text.slice(name.length + 1, -1).split(', ')[0];
       const [ic, label] = STEP[name] || ['more', name];
-      const head = prev !== 'assistant' && prev !== 'tool' && prev !== 'image' ? `<div class="who" style="margin-bottom:6px">${esc(state.name.toLowerCase())}.</div>` : '';
+      const head = prev !== 'assistant' && prev !== 'tool' && prev !== 'image' ? `<div class="who" style="margin-bottom:6px">${esc(state.name.toLowerCase())}</div>` : '';
       out = `${head ? `<div class="msg kuro${cls}" style="margin-bottom:-8px">${head}</div>` : ''}<div class="step${cls}">${icon(ic)}<span>${esc(label)}${args && !['screenshot', 'list_tasks', 'accounts'].includes(name) ? ' ' + esc(args) : ''}</span></div>`;
     } else if (m.role === 'image') out = `<a class="shot${cls}" href="${esc(m.text)}" target="_blank" rel="noopener"><img src="${esc(m.text)}" alt="Screenshot ${esc(state.name)} took" loading="lazy"></a>`;
     else out = `<div class="note${cls}">${icon('info')}<span>${esc(m.text)}</span></div>`;
@@ -897,8 +897,8 @@ function renderChat() {
     return out;
   }).join('');
   const live = c.busy
-    ? `<div class="live"><div class="who">${esc(state.name.toLowerCase())}.${timer(c.busySince).replace('class="tick', 'class="tick live-time')}</div><div class="act shimmer">${esc(friendlyActivity(c.activity))}</div></div>`
-    : c.pending ? `<div class="live"><div class="who">${esc(state.name.toLowerCase())}.</div><div class="act">${c.waitingForBrain ? 'Finishing another chat first…' : 'Starting…'}</div></div>` : '';
+    ? `<div class="live"><div class="who">${esc(state.name.toLowerCase())}${timer(c.busySince).replace('class="tick', 'class="tick live-time')}</div><div class="act shimmer">${esc(friendlyActivity(c.activity))}</div></div>`
+    : c.pending ? `<div class="live"><div class="who">${esc(state.name.toLowerCase())}</div><div class="act">${c.waitingForBrain ? 'Finishing another chat first…' : 'Starting…'}</div></div>` : '';
   const empty = !c.messages.length && !live ? `<div class="empty">Ask ${esc(state.name)} anything, or tell it what to get done.</div>` : '';
   const sig = c.messages.length + ':' + (c.messages.at(-1) || {}).id + ':' + c.busy + ':' + c.activity + ':' + c.pending + ':' + speakingId;
   if ($('#thread').dataset.sig !== sig) {
@@ -920,7 +920,7 @@ function friendlyActivity(a) {
 function renderTasks() {
   if (built !== 'tasks') {
     $('#view').innerHTML = `<div class="page col">
-      <div class="page-head"><h1>tasks.</h1><button class="pill" data-act="toggle-new">New task</button></div>
+      <div class="page-head"><h1>tasks</h1><button class="pill" data-act="toggle-new">New task</button></div>
       <div id="new-task"></div>
       <div class="seg" role="tablist" id="seg"></div>
       <div id="task-list"></div></div>`;
