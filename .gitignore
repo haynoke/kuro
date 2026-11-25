@@ -1,0 +1,25 @@
+# Machine configuration, accounts, tasks, logs, uploads and screenshots
+/config.json
+/mcp.json
+/data/
+/.release-local/
+/.impeccable/
+/DESIGN.md
+/PRODUCT.md
+/.agents/
+/.codex/
+/.aws/
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+auth.json
+credentials.json
+node_modules/
+__pycache__/
+.venv/
+*.zip
+*.tar
+*.tar.gz
