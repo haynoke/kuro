@@ -146,7 +146,7 @@ The model is instructed to ask before sending, buying, or deleting, but that ins
 
 ### Voice
 
-Voice starts disabled. Install Python and faster-whisper in the Python environment Kuro will use:
+Voice starts disabled. The microphone lives in the optional chat, so enable chat and Ollama first. Install Python and faster-whisper in the Python environment Kuro will use:
 
 ```powershell
 python -m pip install faster-whisper

@@ -949,7 +949,7 @@ function renderNewTask() {
     <label>What should get done?<textarea name="prompt" placeholder="Describe the goal, what done looks like, and how to check it."></textarea></label>
     <div class="two"><label>Folder<input name="cwd" list="projects" value="" placeholder="Empty = a fresh folder for this task"><datalist id="projects">${opts}</datalist></label>
       <label>Start with<select name="prefer"><option value="auto">Whichever is free</option><option value="claude">Claude</option><option value="codex">Codex</option></select></label></div>
-    <label>Model<select name="model"><option value="">Default (Opus or your Codex default)</option>
+    <label>Model<select name="model"><option value="">Default (provider CLI setting)</option>
       ${['claude', 'codex'].map((eng) => `<optgroup label="${eng === 'claude' ? 'Claude' : 'Codex'}">${(state.models || []).filter((m) => m.engine === eng).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</optgroup>`).join('')}</select></label>
     <label>Effort<select name="effort">${EFFORTS.map(([v, name, desc]) => `<option value="${v}" ${v === currentEffort() ? 'selected' : ''}>${name}: ${desc}</option>`).join('')}</select></label>
     <div class="error" id="task-err"></div>
