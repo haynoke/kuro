@@ -17,7 +17,7 @@ const commits = git('rev-list', '--all').trim().split('\n').filter(Boolean);
 const blobs = new Map();
 for (const commit of commits) {
   for (const entry of git('ls-tree', '-r', '-z', commit).split('\0').filter(Boolean)) {
-    const [, type, hash, file] = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
+    const [, , type, hash, file] = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
     if (type !== 'blob') continue;
     if (forbidden.test(file)) { console.error(`Private/non-source file in history: ${file} (${commit.slice(0, 8)})`); failed = true; }
     if (!blobs.has(hash)) blobs.set(hash, file);
@@ -27,8 +27,8 @@ for (const commit of commits) {
 const texts = [...files.filter((file) => fs.existsSync(path.join(root, file))).map((file) => [file, fs.readFileSync(path.join(root, file), 'utf8')]),
   ...[...blobs].map(([hash, file]) => [`${file} (history ${hash.slice(0, 8)})`, git('cat-file', 'blob', hash)])];
 for (const [file, content] of texts) for (const [label, pattern] of patterns) {
-  // These patterns and their controlled security-test values are not private data.
-  if (/^(?:test\/|scripts\/audit-release\.js)/.test(file)) continue;
+  // Reserved addresses in access-control fixtures are controlled test inputs.
+  if (label === 'private network address' && file.startsWith('test/')) continue;
   if (pattern.test(content)) { console.error(`${label} requires review: ${file}`); failed = true; }
 }
 console.log(`Reviewed ${files.length} tracked files, ${commits.length} commits, and ${blobs.size} unique history blobs.`);
