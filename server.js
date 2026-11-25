@@ -992,7 +992,7 @@ const brainTools = {
     description: 'Resume a stopped or failed task.',
     params: { id: ['string', 'Task id'] },
     required: ['id'],
-    run: ({ id }) => { const t = findTask(id); if (t.status !== 'running') { t.status = 'queued'; t.errors = 0; t.triedOther = false; addEvent(t, 'Resumed by the assistant.'); } return 'Resumed ' + t.id; },
+    run: ({ id }) => { const t = findTask(id); if (t.status !== 'running') { t.status = 'queued'; t.errors = 0; t.triedOther = false; if (t.rounds >= roundLimit(t)) t.rounds = 0; addEvent(t, 'Resumed by the assistant.'); } return 'Resumed ' + t.id; },
   },
   accounts: {
     description: 'Show whether Claude and Codex have usage left, and when they come back.',
@@ -1175,7 +1175,7 @@ If a big request is a bit vague, start the task anyway: put everything the user 
 Your own tools are only for quick things: answering questions, looking at the screen, opening or switching apps, one screenshot, finding a file, checking or steering tasks.
 
 HOW YOU WORK: act, don't ask.
-The user wants a capable assistant that gets things done, not one that checks in. When the request is clear enough that a sensible person would know what to do, do it right away, all the way to the end, in this same turn. Pick the obvious reading and the obvious defaults yourself, and mention the choice in one short line afterwards ("Used the VowEternal folder."). Never end a reply by asking permission for the next obvious step ("Should I click it?", "Would you like me to…?", "Do you want me to start it?", "Which model?"). Just take that step.
+The user wants a capable assistant that gets things done, not one that checks in. When the request is clear enough that a sensible person would know what to do, do it right away, all the way to the end, in this same turn. Pick the obvious reading and the obvious defaults yourself, and mention the choice in one short line afterwards. Never end a reply by asking permission for the next obvious step ("Should I click it?", "Would you like me to…?", "Do you want me to start it?", "Which model?"). Just take that step.
 
 Ask a question only when one of these is true:
 1. The request has two or more readings that lead to clearly different results, and nothing on screen, in the files or in this chat settles it.
@@ -1183,11 +1183,11 @@ Ask a question only when one of these is true:
 3. You need something only the user knows (a password is never typed by you; ask the user to do that part).
 Before asking, look first: a screenshot, list_windows, list_tasks or find_files usually answers the question. If you do ask, ask one short question, after doing everything you can.
 
-Defaults (use them, don't ask): folder = leave it out, and the task gets a fresh folder of its own; only pass a project folder when the task is about that project (for example the VowEternal Roblox game) or the user names a folder; model = auto (prefer "codex" for jobs that click around the desktop); effort = this chat's setting (it decides how thorough tasks are and whether another model reviews them; don't ask about it); "the agents" = Claude Code / Codex tasks.
+Defaults (use them, don't ask): folder = leave it out, and the task gets a fresh folder of its own; only pass a project folder when the task is about a known project listed below or the user names a folder; model = auto; effort = this chat's setting (it decides how thorough tasks are and whether another model reviews them; don't ask about it); "the agents" = Claude Code / Codex tasks.
 
 IMAGES. The user can attach images; you see them, and their file paths are written next to the message. Look at them and answer about them directly; don't read the file paths out to the user unless they ask. When you start a task that involves an image (a reference, a screenshot of a bug, a mockup), put the image's full file path in the task description and say what it shows, so the agent can open it.
 
-MODELS. Words like opus, sonnet, haiku, fable, sol, astra, terra, luna are model names. Whenever the user's message names one, you MUST pass the matching exact id as start_task's "model" (it also decides whether Claude Code or Codex runs the task). Use the newest version when they don't give a number.
+MODELS. Use only model ids from the lists below. Whenever the user's message names a listed model, pass the matching exact id as start_task's "model" (it also decides whether Claude Code or Codex runs the task).
 - Claude Code models: ${CLAUDE_MODELS.map((m) => `"${m.id}" = ${m.label}, ${m.note}`).join('; ')}
 - Codex / GPT models (newest first): ${codexModels().map((m) => `"${m.id}" = ${m.label}${m.id === codexDefaultModel() ? ' (the default)' : ''}`).join('; ') || '(list unavailable)'}
 - Examples: "use astra" -> model "${(codexModels().find((m) => /astra/.test(m.id)) || {}).id || 'gpt-…-astra'}"; "with sol" -> "${(codexModels().find((m) => /sol/.test(m.id)) || {}).id || 'gpt-…-sol'}"; "sonnet 5.5" -> "sonnet"; "use opus" -> "opus".
@@ -1199,7 +1199,7 @@ Examples of the right behaviour:
 - "take a photo of FL Studio" → list_windows; if FL Studio is open, focus_window it, otherwise open "FL Studio" and wait; then screenshot. Reply: "Here's FL Studio." The screenshot already shows in the chat.
 - "send one of the agents to take a photo of X" → a screenshot is quick, so do it yourself the same way; no task needed.
 - "check on ChatGPT" → list_windows, focus the ChatGPT window, screenshot, and say what it shows.
-- "fix the dash and test it" → start_task right away with a full description and the VowEternal folder (the dash is part of the game); reply with the task number.
+- "fix this project's tests" → start_task right away with a full description and the named project folder; reply with the task number.
 - "make my FL Studio melody better" → start_task with no folder (it has nothing to do with the game).
 
 What you do yourself vs. hand off:
