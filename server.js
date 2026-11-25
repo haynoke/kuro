@@ -11,6 +11,7 @@ const { loadConfig } = require('./lib/config');
 const { readJson, writeJson } = require('./lib/storage');
 const { createAccess } = require('./lib/access');
 const { checkedArgs, cliArgs, probe } = require('./lib/providers');
+const { commandSpec } = require('./lib/commands');
 
 const ROOT = __dirname;
 let config;
@@ -287,7 +288,9 @@ function runCli(task, acc, prompt, sessionId, { onActivity, onSession }) {
       model: task.model?.engine === acc.engine ? task.model.id : undefined, progressDir: taskDir(task) });
 
     const command = acc.engine === 'codex' ? codexCommand() : (config.claudePath || 'claude');
-    const child = spawn(command, args, { cwd: task.cwd, env: childEnv(acc), windowsHide: true });
+    const env = childEnv(acc);
+    const spec = commandSpec(command, env);
+    const child = spawn(spec.file, [...spec.args, ...args], { cwd: task.cwd, env, windowsHide: true });
     running.set(task.id, child);
     appendLog(task, `\n===== ${new Date().toISOString()} ${acc.name} ${sessionId ? 'resume ' + sessionId : 'new session'} =====\n${prompt}\n----- output -----\n`);
 
@@ -600,7 +603,7 @@ async function step(task) {
   } else if (mark === 'BLOCKED') {
     task.status = 'blocked';
     addEvent(task, `${acc.name} needs you. Reply on the task to continue.`);
-  } else if (task.rounds >= (EFFORT[effortOf(task.effort)].rounds || config.maxRounds || 40)) {
+  } else if (task.rounds >= roundLimit(task)) {
     task.status = 'failed';
     addEvent(task, `Reached ${task.rounds} rounds without finishing. Press Resume to keep going.`);
   } else {
@@ -684,6 +687,7 @@ const EFFORT = {
   high: { review: true, rounds: null, note: 'Effort: HIGH. Be thorough: test it, look at the result, and fix anything that is off before you say it is done. Another model will review your work.' },
 };
 const effortOf = (v) => (EFFORT[v] ? v : 'medium');
+const roundLimit = (task) => Math.min(config.maxRounds || 40, EFFORT[effortOf(task.effort)].rounds || Infinity);
 
 function createTask(b) {
   if (!b.prompt || !b.prompt.trim()) throw new Error('Write what the task is.');
@@ -1675,7 +1679,7 @@ const server = http.createServer(async (req, res) => {
           t.status = 'queued';
           t.errors = 0;
           t.triedOther = false;
-          if (t.rounds >= (config.maxRounds || 40)) t.rounds = 0;
+          if (t.rounds >= roundLimit(t)) t.rounds = 0;
           addEvent(t, 'Resumed by you.');
         }
         return send(res, 200, { ok: true });
