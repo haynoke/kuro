@@ -502,7 +502,7 @@ async function step(task) {
       task.updated = Date.now();
     },
     // Keep the session as soon as the agent reports it, so a restart mid-round can resume it.
-    onSession: (id) => { if (!reviewing) { task.sessions[acc.name] = id; save(); } },
+    onSession: (id) => { if (!reviewing) { task.sessions[acc.name] = id; flushState(); } },
   });
   turn.ended = Date.now();
   turn.reply = (res.text || res.errorText || '').slice(0, 20000);
@@ -635,7 +635,7 @@ function tick() {
     step(t).catch((err) => {
       t.status = 'failed';
       addEvent(t, 'Runner error: ' + err.message);
-    }).finally(save);
+    }).finally(flushState);
   }
 }
 setInterval(tick, 3000);
@@ -711,6 +711,7 @@ function createTask(b) {
   };
   tasks.push(t);
   addEvent(t, 'Task added.');
+  flushState();
   setTimeout(tick, 50);
   return t;
 }
