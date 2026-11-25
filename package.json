@@ -1,0 +1,13 @@
+{
+  "name": "kuro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Start coding tasks from your phone and follow their progress on your PC.",
+  "repository": "github:haynoke/kuro",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node scripts/doctor.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  }
+}
