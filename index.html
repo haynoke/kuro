@@ -515,8 +515,8 @@ const ICONS = {
   copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>',
 };
 
-// The phone opens this page over plain http (Tailscale IP), where
-// navigator.clipboard does not exist, so fall back to a hidden textarea.
+// navigator.clipboard can be missing or refuse to write in some browsers,
+// so fall back to a hidden textarea.
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch {}
   const ta = document.createElement('textarea');
@@ -765,9 +765,12 @@ function renderSide() {
     <div class="usage-mini">${state.accounts.map((a) => `<div class="acct"><span class="dot ${a.limitedUntil ? 'waiting' : 'running'}"></span>
       <div class="acct-main">
         <div class="acct-line"><b>${esc(a.name)}</b><span class="t num" title="Usage left: 5-hour window · weekly">${esc(usageLine(a))}</span></div>
-        <div class="acct-sub" title="${a.who ? 'Signed in as ' + esc(a.who.email || '') : 'Not signed in'}"><span class="email">${esc(a.who ? a.who.email || 'Signed in' : 'Not signed in')}</span>${a.who && a.who.plan ? `<span class="plan-chip">${esc(a.who.plan)}</span>` : ''}</div>
+        <div class="acct-sub" title="${a.who && a.who.email ? 'Signed in as ' + esc(a.who.email) : signedIn(a)}"><span class="email">${esc(signedIn(a))}</span>${a.who && a.who.plan ? `<span class="plan-chip">${esc(a.who.plan)}</span>` : ''}</div>
       </div></div>`).join('')}</div>`;
 }
+
+// ready comes from the CLI sign-in check; account details can be missing even then.
+function signedIn(a) { return (a.who && a.who.email) || (a.who || a.ready ? 'Signed in' : 'Not signed in'); }
 
 function renderTop() {
   const r = route;
@@ -841,7 +844,7 @@ function renderHome() {
         ${a.limitedUntil ? `<button data-act="clear-limit" data-name="${esc(a.name)}">It's back, mark ready</button>` : ''}
         <div class="wins${a.usage && Date.now() - a.usage.at > 30 * 60e3 ? ' stale' : ''}">${usageWindow('5-hour', a.usage && a.usage.fiveHour)}${usageWindow('Weekly', a.usage && a.usage.weekly)}</div>
         ${a.engine === 'claude' ? `<p class="win-note">Limits for Kuro's agents (Claude Code). The Claude app counts its own usage separately.</p>` : ''}
-        <span class="email" title="Signed in account">${esc([a.who ? a.who.email || 'Signed in' : 'Not signed in', a.usage ? 'updated ' + ago(a.usage.at) + (ago(a.usage.at) === 'now' ? '' : ' ago') : 'no usage data yet'].join(' · '))}</span></div>`).join('')}</div></section>`;
+        <span class="email" title="Signed in account">${esc([signedIn(a), a.usage ? 'updated ' + ago(a.usage.at) + (ago(a.usage.at) === 'now' ? '' : ' ago') : 'no usage data yet'].join(' · '))}</span></div>`).join('')}</div></section>`;
 }
 
 function renderChat() {

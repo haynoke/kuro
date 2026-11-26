@@ -34,6 +34,8 @@ Ollama runs locally by default. A custom remote `ollamaUrl` sends chat content t
 
 `config.json`, `mcp.json`, `data/`, local review files, credentials, and environment files are excluded from Git. Runtime data includes task prompts, CLI output, chats, screenshots, local paths, and account metadata. Keep backups private. Git ignore rules do not protect files someone deliberately force-adds, and do not remove secrets already committed.
 
-There was no Git history in the supplied folder. The release history starts with exclusions and contains only reviewed source and portable examples. Run `node scripts/audit-release.js` before publishing to recheck tracked files and all reachable commits. It is a heuristic check, not proof that arbitrary source contains no secret.
+Run `node scripts/audit-release.js` before pushing changes to check tracked files and all reachable commits. Images are rejected everywhere except `docs/screenshots/`, so look at anything you add there for private details. The audit is a heuristic check, not proof that arbitrary source contains no secret.
 
-If you find an access-control issue, avoid posting credentials, private logs, or a working exploit against someone's PC in a public issue. Use a private GitHub security advisory for `haynoke/kuro` if that channel is enabled.
+## Reporting a problem
+
+Report access-control issues privately through [a GitHub security advisory](https://github.com/haynoke/kuro/security/advisories/new). Do not post credentials, private logs, or a working exploit against someone's PC in a public issue.

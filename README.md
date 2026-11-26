@@ -6,6 +6,15 @@ Kuro runs Claude Code or Codex on your Windows PC and gives you a page for start
 
 Your PC must stay awake and connected. Coding providers need their own accounts and access. Approvals and sandbox restrictions stay enabled, so some unattended tasks will stop and need you.
 
+<p>
+  <img src="docs/screenshots/phone-task.png" width="300" alt="A finished task on a phone, with the agent's latest reply and progress log">
+  <img src="docs/screenshots/phone-needs-you.png" width="300" alt="A task marked Needs you, asking for a sign-in on the PC">
+</p>
+
+<img src="docs/screenshots/desktop-tasks.png" width="720" alt="The desktop task list with one task that needs you and one that is done">
+
+Screenshots show sample tasks, captured in a desktop browser at phone and desktop sizes.
+
 ## Windows quickstart
 
 You need [Node.js 22 or newer](https://nodejs.org/), [Git](https://git-scm.com/downloads/win), and one coding provider. There is no build step and no dependency install for Kuro itself.
@@ -190,8 +199,8 @@ Run `node scripts/doctor.js` from the Kuro folder. Missing config tells you the 
 
 Codex runs with workspace-write and approval policy on-request. Claude uses default permission mode. Existing provider policies, project rules, hooks, MCP servers, and platform restrictions still apply. Noninteractive CLIs can deny approval requests instead of displaying them. Resolve the prerequisite or narrowly scoped permission in the provider CLI, then Resume. A chat reply is not a CLI approval. See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode) and [Claude permissions](https://code.claude.com/docs/en/permissions).
 
-Run `npm test` for release checks. Tests create temporary copies and use controlled CLI event fixtures for task completion, rate limits, restart recovery, and permissions. They do not contact paid providers or touch your task data. See [RELEASE_CHECKS.md](RELEASE_CHECKS.md) for live results and remaining checks.
+Run `npm test` to check a change. Tests create temporary copies and use controlled CLI event fixtures for task completion, rate limits, restart recovery, and permissions. They do not contact paid providers or touch your task data.
 
 ## License
 
-A license has not been chosen yet. Source is available for inspection, but this release candidate does not grant an open-source license. Choose and add one before publishing if you want others to reuse or modify it.
+[MIT](LICENSE)

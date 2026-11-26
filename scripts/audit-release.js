@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const root = path.resolve(__dirname, '..');
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 const forbidden = /^(?:config\.json|mcp\.json|data\/|\.release-local\/|\.impeccable\/|\.env(?:\.|$)|\.aws\/|\.codex\/|\.agents\/|DESIGN\.md$|PRODUCT\.md$)|(?:^|\/)(?:auth|credentials)\.json$|\.(?:png|jpe?g|webp|gif|log|pem|key)$/i;
+// README screenshots are the only images that belong in the repository.
+const isPrivate = (file) => !/^docs\/screenshots\/[\w-]+\.png$/.test(file) && forbidden.test(file);
 const patterns = [
   ['personal Windows path', /[A-Z]:[\\/](?:Users|Documents and Settings)[\\/](?!Public\b|Default\b)[^\s<>"'`]+/i],
   ['private network address', /\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b/],
@@ -12,14 +14,14 @@ const patterns = [
 ];
 let failed = false;
 const files = git('ls-files', '-z').split('\0').filter(Boolean);
-for (const file of files) if (forbidden.test(file)) { console.error(`Private/non-source file is tracked: ${file}`); failed = true; }
+for (const file of files) if (isPrivate(file)) { console.error(`Private/non-source file is tracked: ${file}`); failed = true; }
 const commits = git('rev-list', '--all').trim().split('\n').filter(Boolean);
 const blobs = new Map();
 for (const commit of commits) {
   for (const entry of git('ls-tree', '-r', '-z', commit).split('\0').filter(Boolean)) {
     const [, , type, hash, file] = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
     if (type !== 'blob') continue;
-    if (forbidden.test(file)) { console.error(`Private/non-source file in history: ${file} (${commit.slice(0, 8)})`); failed = true; }
+    if (isPrivate(file)) { console.error(`Private/non-source file in history: ${file} (${commit.slice(0, 8)})`); failed = true; }
     if (!blobs.has(hash)) blobs.set(hash, file);
   }
 }
