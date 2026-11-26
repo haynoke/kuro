@@ -1,25 +1,28 @@
 # Kuro
 
-I built Kuro while working on VowEternal because I wanted to start a coding task from my phone, walk away, and check on it later.
+**Run Claude Code from your phone.** Start a coding task on your Windows PC, walk away, and check on it from anywhere. Works with Codex too.
 
-Kuro runs Claude Code or Codex on your Windows PC and gives you a page for starting tasks, reading progress, and sending follow-up instructions. If a provider runs out of usage, another configured provider can take over with a progress log. If every available provider is limited, the task waits for a reset.
-
-Your PC must stay awake and connected. Coding providers need their own accounts and access. Approvals and sandbox restrictions stay enabled, so some unattended tasks will stop and need you.
-
-<p>
-  <img src="docs/screenshots/phone-task.png" width="300" alt="A finished task on a phone, with the agent's latest reply and progress log">
-  <img src="docs/screenshots/phone-needs-you.png" width="300" alt="A task marked Needs you, asking for a sign-in on the PC">
+<p align="center">
+  <img src="docs/screenshots/phone-new-task.png" width="260" alt="Starting a new task on a phone">
+  <img src="docs/screenshots/phone-tasks.png" width="260" alt="Task list on a phone showing working, needs you and done tasks">
+  <img src="docs/screenshots/phone-task.png" width="260" alt="A finished task on a phone with the reply and progress log">
 </p>
 
-<img src="docs/screenshots/desktop-tasks.png" width="720" alt="The desktop task list with one task that needs you and one that is done">
+<p align="center">
+  <img src="docs/screenshots/desktop-tasks.png" width="800" alt="Task list on desktop">
+</p>
 
-Screenshots show sample tasks, captured in a desktop browser at phone and desktop sizes.
+## What it does
 
-## Windows quickstart
+- **Start tasks remotely** in any project folder on your PC
+- **See what needs you** at a glance, then reply or resume
+- **Get past usage limits** by handing off to another account or Codex, or waiting for the reset
+- **Get a second opinion** on High effort, where Codex reviews Claude's work and vice versa
+- **Pick up after restarts** from saved sessions
 
-You need [Node.js 22 or newer](https://nodejs.org/), [Git](https://git-scm.com/downloads/win), and one coding provider. There is no build step and no dependency install for Kuro itself.
+## Quickstart
 
-These commands are for PowerShell. Run this first in the folder where you keep projects:
+You need Windows, [Node.js 22+](https://nodejs.org/), [Git](https://git-scm.com/downloads/win), and [Claude Code](https://code.claude.com/docs/en/setup) signed in. Nothing else to install.
 
 ```powershell
 git clone https://github.com/haynoke/kuro.git
@@ -27,68 +30,27 @@ cd kuro
 Copy-Item config.example.json config.json
 ```
 
-The example uses **Codex only**. If you do not have its CLI, install it, then sign in:
+In `config.json`, set `accounts` to use Claude Code (or [use Codex](docs/guide.md#use-codex)):
 
-```powershell
-npm install -g @openai/codex
-codex login
-codex login status
+```json
+"accounts": [{ "name": "Claude", "engine": "claude", "env": {} }]
 ```
-
-Complete sign-in in the browser when asked. The status command should say you are logged in. For coding tasks on Windows, also run `codex` once in a disposable project folder and complete its sandbox setup. Keep its normal protected workspace mode. See the [Codex Windows sandbox guide](https://learn.chatgpt.com/docs/windows/windows-sandbox).
-
-Back in the **kuro folder**, check setup and start it:
 
 ```powershell
 node scripts/doctor.js
 node server.js
 ```
 
-The check should report `Codex: signed in and ready`. The server should print `Kuro is up: http://localhost:8790`. Keep that terminal open, or use `start.cmd` next time.
+Open [localhost:8790](http://localhost:8790) and start a task.
 
-Open [localhost:8790](http://localhost:8790), choose **Start a coding task**, then **New task**. Leave Folder empty to get a separate workspace under your home folder's `Kuro Tasks` directory. Choose Low effort and submit:
+> Kuro never skips permissions. [Allow the edits and commands](https://code.claude.com/docs/en/permissions) your tasks need in Claude Code, or they stop at **Needs you**.
 
-```text
-This is a read-only startup check. Do not use tools or change files. Reply with "kuro is ready" and end with TASK STATUS: DONE.
-```
+## Phone access
 
-Success is a task marked **Done**, with `kuro is ready` in the latest reply. That checks the page, runner, sign-in, and provider connection without requiring write permissions.
-
-Then try a small coding task in a disposable folder: `Create hello.txt containing kuro works, read it back to check it, and update the progress log.` Success is **Done**, the file in the task's working folder, and a progress entry on its task page. If it says Needs you, read the reply and resolve the permission or Windows sandbox setup in the provider CLI before choosing Resume. Kuro does not present interactive CLI approval prompts in the browser.
-
-### Use Claude Code instead
-
-Install and sign in following the [Claude Code setup guide](https://code.claude.com/docs/en/setup), including its Windows prerequisites. In `config.json`, replace `accounts` with:
-
-```json
-"accounts": [{ "name": "Claude", "engine": "claude", "env": {} }]
-```
-
-Run `claude auth login`, then `claude auth status`. Repeat the setup check and startup commands above. Leave `claudeArgs` empty for the first task. Default permission mode can deny edits or commands in a noninteractive run; use a narrowly scoped provider permission rule if needed, then Resume. Do not enable permission bypasses.
-
-## Set it up with your coding agent
-
-Paste this into an agent opened in your Kuro checkout:
-
-```text
-Set up this Kuro checkout using its README. Read the code and config example first. Check Windows, Node.js 22+, Git, and the installed Claude Code or Codex CLI. Preserve any existing config.json, provider accounts, and data. Configure one available provider using the documented defaults, keeping approval and sandbox protections enabled. Pause if I need to sign in interactively or finish Windows sandbox setup, and tell me the exact command. Run node scripts/doctor.js, start Kuro, open localhost, and complete the documented read-only startup task. Then verify a small file task in a disposable workspace if permissions allow. Report what passed and any remaining manual step. Do not enable remote access or optional integrations unless I ask.
-```
-
-## Phone access with Tailscale
-
-Kuro binds to `127.0.0.1`, including in remote mode. Direct LAN and Tailscale IP connections to port 8790 do not work. Use [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve) to proxy HTTPS to localhost. Do not use Funnel or forward your router's ports.
-
-1. Install Tailscale on your PC and phone, sign them into your tailnet, and restrict access to your own devices in Tailscale's access policy.
-2. Stop Kuro with Ctrl+C. In another PowerShell window, run:
-
-   ```powershell
-   tailscale serve --bg http://127.0.0.1:8790
-   ```
-
-   Follow any HTTPS enablement instructions from Tailscale. Note the `https://...ts.net` address it prints. Kuro will reject that hostname until you configure remote mode.
-
-3. In `config.json`, set `remoteAccess` to `true` and `publicOrigin` to that exact HTTPS origin, without a trailing slash. Leave the port at 8790, or change the Serve target to match it.
-4. In PowerShell in the **kuro folder**, generate a private password and start Kuro from the same window:
+1. Install [Tailscale](https://tailscale.com/download) on your PC and phone, using the same account.
+2. Run `tailscale serve --bg http://127.0.0.1:8790` and copy the `https://...ts.net` address.
+3. In `config.json`, set `remoteAccess` to `true` and `publicOrigin` to that address, without a trailing slash.
+4. Restart Kuro with a password:
 
    ```powershell
    $env:KURO_AUTH_TOKEN = node scripts/token.js
@@ -96,110 +58,14 @@ Kuro binds to `127.0.0.1`, including in remote mode. Direct LAN and Tailscale IP
    node server.js
    ```
 
-   Save the printed password privately. It is shown so you can enter it on your phone. Do not put it in Git, screenshots, or a URL. The variable lasts for that PowerShell session; restore it there before future starts, or generate a new password. A separately opened `start.cmd` will not inherit it.
+5. Open the address on your phone. Username is `kuro`, password is the printed token.
 
-5. On the phone with Tailscale connected, open the HTTPS address. The browser should ask for username **kuro** and the password above. The PC's localhost page requires the same credentials in remote mode. Start the read-only task and confirm Done. In Safari, Share > Add to Home Screen is optional.
+Keep your PC awake. Do not use Tailscale Funnel or port forwarding.
 
-The password protects the page, API, task data, and images. Missing credentials get HTTP 401; an unconfigured hostname gets 403. Kuro refuses to start remote mode without both the HTTPS origin and a token of at least 32 bytes. Tailscale Serve is an explicit trust boundary: keep it tailnet-only. See [SECURITY.md](SECURITY.md).
+## More
 
-To turn phone access off, run `tailscale serve reset`, set `remoteAccess` to `false`, and restart Kuro. Reset clears this device's Serve configuration, so check `tailscale serve status` first if you use Serve for other services.
-
-## What happens to a task
-
-A provider gets your prompt and instructions to keep `PROGRESS.md` current. It ends a turn with `TASK STATUS: DONE`, `CONTINUE`, or `BLOCKED`. Continue starts another turn in the same session; Blocked waits for your reply. Notes sent while a task runs arrive on its next turn.
-
-On a recognized usage-limit response, Kuro puts that account on cooldown and tries another available account. A new provider reads the progress log and checks the working files. This is a handoff between separate sessions, not a transfer of hidden conversation state. If the agent never wrote a progress log before interruption, the next provider has less context.
-
-Reset times are estimates parsed from provider output. Unknown reset times use a 30-minute retry. Usage cards use Claude's run events and Codex's local session files when available; they can be missing or stale. Missing CLI or sign-in blocks with a setup message rather than waiting for a usage reset.
-
-High effort requests a review from the other engine when one is configured and available. With only one engine there is no separate review. If the other engine is unavailable, the event history says review was skipped. An invalid review or unresolved requested changes stops for you rather than claiming a pass. Low and Medium use one agent without a separate reviewer.
-
-After a restart, running tasks return to the queue, interrupted turns are marked, and saved provider session IDs are reused. Waiting tasks keep their cooldowns. Blocked, stopped, and finished tasks stay that way until you act. Keep only one Kuro process per data directory.
-
-Task creation, session IDs, and completed turns save immediately; other updates are briefly debounced, so a hard crash may lose the latest activity. Kuro does not undo partial agent edits. Check the files after a crash before resuming work with side effects.
-
-## Optional setup
-
-### Both coding providers
-
-Add a second signed-in provider to `accounts` and restart:
-
-```json
-"accounts": [
-  { "name": "Codex", "engine": "codex", "env": {} },
-  { "name": "Claude", "engine": "claude", "env": {} }
-]
-```
-
-Accounts are tried in order, with a task's current session and chosen provider taken into account. Use providers you are authorized to access and follow their account and usage terms.
-
-### Ollama chat
-
-Tasks work without Ollama. The optional chat uses a local model to answer questions, find files, manage tasks, and pass coding work to a provider.
-
-Install [Ollama](https://ollama.com/), then run:
-
-```powershell
-ollama pull qwen3.5:9b
-```
-
-Set `chat` to `true` in `config.json`, leave `localModel` at `qwen3.5:9b`, and restart Kuro. Run `node scripts/doctor.js` to check the model and connection. The model needs enough RAM or VRAM for your context; choose a smaller model or context on smaller machines. The first download requires internet.
-
-If Ollama is not running, Kuro tries to start its local installation. Set `ollamaPath` for an unusual install location, or `ollamaUrl` for a different endpoint. A remote Ollama URL sends chat content there.
-
-### Desktop control
-
-With chat enabled, setting `desktopControl` to `true` lets the local model take screenshots and operate Windows through `desktop.ps1`. It starts disabled. This is desktop automation with your logged-in user's access, outside the coding providers' sandbox. It requires an interactive desktop, not a locked or headless session.
-
-The model is instructed to ask before sending, buying, or deleting, but that instruction is not an enforced approval dialog. Enable this only if you accept that access. Desktop control is independent of provider MCP tools.
-
-### Voice
-
-Voice starts disabled. The microphone lives in the optional chat, so enable chat and Ollama first. Install Python and faster-whisper in the Python environment Kuro will use:
-
-```powershell
-python -m pip install faster-whisper
-```
-
-Set `voice` to `true` and restart. Set `pythonPath` to the full Python executable path if needed. `whisper_server.py` listens on localhost port 8792 and loads `small.en` on the CPU by default. Its first run downloads model files. Browser recordings go to this PC for transcription. Sending the resulting text to a coding provider still sends that text to the provider.
-
-In chat, use the mic button or Ctrl+D. A second press or a pause sends the recording; Esc cancels. Read aloud uses the browser's speech service and available voices. Phone microphone access requires the Tailscale HTTPS URL; keyboard dictation also works. Check `/api/voice` while signed in for model readiness or load errors. Change `whisperPort` if 8792 is occupied.
-
-### Roblox Studio
-
-Kuro does not ship or install the Studio bridge. If your Roblox Studio setup already supplies `%LOCALAPPDATA%\Roblox\mcp.bat`, copy the example in the **kuro folder**:
-
-```powershell
-Copy-Item mcp.example.json mcp.json
-```
-
-Set `claudeMcpConfig` to `mcp.json` in `config.json`. Adjust the ignored local file for your installed bridge. Claude receives it through `--mcp-config`; Codex uses MCP servers in its own CLI configuration. Open the intended Studio place and verify tools from the provider CLI first. Provider tool approvals still apply. This is not needed for the first task.
-
-## Configuration and private files
-
-`config.example.json` is the portable starting point. `config.json`, `mcp.json`, `data/`, and local review artifacts are ignored by Git. Do not force-add them. Back them up privately before upgrading; an existing config is never overwritten automatically.
-
-| Setting | Purpose |
-| --- | --- |
-| `accounts` | Provider names, engines, and optional account environment variables. Sign-in is checked at startup. Restart after fixing sign-in. |
-| `codexPath`, `claudePath` | Optional full executable paths if a CLI is not on PATH. Standard Windows npm provider shims use their Node entry points. |
-| `codexArgs`, `claudeArgs` | Limited model/run options. Kuro rejects permission bypasses and arbitrary security overrides. |
-| `workspaceRoot` | Parent for new task folders. Default: `Kuro Tasks` under your home folder. Existing project folders can be selected instead. |
-| `projects` | Optional folder shortcuts, each with `name` and full `path`. |
-| `maxParallel`, `maxRounds`, `reviewRounds` | Concurrent tasks, maximum work turns, and review-fix attempts. Low and Medium also have smaller turn limits. |
-| `KURO_CONFIG`, `KURO_DATA_DIR` | Environment overrides for an isolated config and data directory. Relative paths resolve from the launch directory. |
-
-When updating an older personal install, compare it with the example. Old configs may contain bypass flags; those providers will be unavailable until you remove them. Remote IP access also changes to the authenticated Serve setup. Local config and task data are retained.
-
-Task state lives in `data/tasks.json`, cooldowns in `data/accounts.json`, and chats in `data/chats.json`. Each task has `data/tasks/<id>/PROGRESS.md`, `log.txt`, and a `files/` directory for images. These can contain prompts, source details, local paths, and account metadata. Deleting a task removes its list entry, not its working files or saved logs. A corrupt state file stops startup instead of silently discarding tasks; restore a private backup or move that file aside deliberately.
-
-## Troubleshooting and checks
-
-Run `node scripts/doctor.js` from the Kuro folder. Missing config tells you the copy command. Missing provider or sign-in tells you what to fix. If a port is occupied, startup exits with an explanation; change `port` in local config and match the Serve target if enabled.
-
-Codex runs with workspace-write and approval policy on-request. Claude uses default permission mode. Existing provider policies, project rules, hooks, MCP servers, and platform restrictions still apply. Noninteractive CLIs can deny approval requests instead of displaying them. Resolve the prerequisite or narrowly scoped permission in the provider CLI, then Resume. A chat reply is not a CLI approval. See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode) and [Claude permissions](https://code.claude.com/docs/en/permissions).
-
-Run `npm test` to check a change. Tests create temporary copies and use controlled CLI event fixtures for task completion, rate limits, restart recovery, and permissions. They do not contact paid providers or touch your task data.
+- [Guide](docs/guide.md): Codex, multiple accounts, local chat, voice, desktop control, settings, troubleshooting
+- [Security](SECURITY.md)
 
 ## License
 
