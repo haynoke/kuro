@@ -24,6 +24,12 @@ These settings do not replace provider policies or Windows sandbox setup. Claude
 
 Interactive sign-in and approval dialogs are not relayed to the phone. A denied permission or a BLOCKED reply stops the task for you. Resolve it with the provider CLI and a narrow permission rule, then Resume. Kuro does not approve it automatically.
 
+## Accounts
+
+Anyone who can use the web page can add, remove and reorder accounts, including over remote mode with the token. The page sends only names, providers and positions: it cannot set paths, environment variables or arguments, and it never receives provider tokens. Signing in happens in a terminal on the PC.
+
+Each extra account has a profile folder, by default under `.kuro\accounts` in your home folder, holding that provider's credentials. Treat it like your main provider profile. Removing an account leaves the folder in place; delete it, or sign out with the provider CLI, to erase the sign-in.
+
 ## Optional local model and desktop control
 
 Chat, voice, and desktop control are off in the example config. When enabled, the local model's file-reading tools can inspect files available to your Windows user. Desktop control can type, click, launch apps, and capture the screen outside provider sandboxes. The model's instruction to ask before consequential actions is not an enforced approval boundary. Keep desktop control disabled unless you accept that access.

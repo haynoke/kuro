@@ -4,8 +4,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(1);
 const claude = args.includes('auth') || args.includes('--output-format');
+// A profile folder Kuro created starts signed out, like with the real CLIs.
+const home = (claude || args[0] === 'auth' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME) || '';
+const marker = /^(claude|codex)-[0-9a-f]{8}$/.test(path.basename(home)) && path.join(home, 'fixture-signed-in');
+if (args.includes('login') && !args.includes('status')) {
+  if (marker) fs.writeFileSync(marker, '');
+  process.exit(0);
+}
 if (args.includes('status')) {
-  if (process.env.KURO_FIXTURE_SCENARIO === 'signed-out') process.exit(1);
+  if (marker && !fs.existsSync(marker)) {
+    console.log(claude ? JSON.stringify({ loggedIn: false }) : 'Not logged in');
+    process.exit(1);
+  }
   console.log(claude ? JSON.stringify({ loggedIn: true }) : 'Logged in using test fixture');
   process.exit(0);
 }
@@ -28,6 +38,10 @@ if (scenario === 'hold' && !args.includes('resume')) {
     if (progress) fs.writeFileSync(progress[1], 'Fixture provider completed step one before hitting its usage limit.');
     emit(claude ? { type: 'result', is_error: true, result: 'Usage limit reached. Try again in 1 minute.' }
       : { type: 'turn.failed', error: { message: 'Usage limit reached. Try again in 1 minute.' } });
+    process.exit(1);
+  }
+  if (scenario === 'error') {
+    emit({ type: 'turn.failed', error: { message: 'Fixture provider failed.' } });
     process.exit(1);
   }
   if (progress) fs.writeFileSync(progress[1], 'Completed and checked by a controlled provider fixture.');

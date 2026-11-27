@@ -28,12 +28,12 @@ async function sandbox(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kuro-release-'));
   const source = path.resolve(__dirname, '..');
   for (const file of ['server.js', 'index.html', 'config.example.json']) fs.copyFileSync(path.join(source, file), path.join(root, file));
-  fs.cpSync(path.join(source, 'lib'), path.join(root, 'lib'), { recursive: true });
+  for (const dir of ['lib', 'scripts']) fs.cpSync(path.join(source, dir), path.join(root, dir), { recursive: true });
   const fixture = path.join(root, 'provider.cjs');
   fs.copyFileSync(path.join(__dirname, 'fixtures', 'provider.cjs'), fixture);
   fs.copyFileSync(path.join(__dirname, 'fixtures', 'cli-adapter.cjs'), path.join(root, 'cli-adapter.cjs'));
   const config = { ...JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'))),
-    port: await unusedPort(), workspaceRoot: path.join(root, 'workspaces'),
+    port: await unusedPort(), workspaceRoot: path.join(root, 'workspaces'), accountsRoot: path.join(root, 'profiles'),
     codexPath: 'kuro-fixture-codex', claudePath: 'kuro-fixture-claude',
     accounts: [{ name: 'Codex', engine: 'codex', env: {} }], ...overrides };
   fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));

@@ -6,7 +6,7 @@
   "maxParallel": 1,
   "maxRounds": 20,
   "reviewRounds": 2,
-  "accounts": [{ "name": "Codex", "engine": "codex", "env": {} }],
+  "accounts": [],
   "claudeArgs": [],
   "codexArgs": ["--skip-git-repo-check"],
   "chat": false,

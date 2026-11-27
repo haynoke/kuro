@@ -2,13 +2,14 @@
   "name": "kuro",
   "version": "0.1.0",
   "private": true,
-  "description": "Start coding tasks from your phone and follow their progress on your PC.",
+  "description": "Open-source orchestrator for coding agents: delegates tasks your way and switches accounts for you.",
   "repository": "github:haynoke/kuro",
   "license": "MIT",
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node server.js",
     "check": "node scripts/doctor.js",
+    "accounts": "node scripts/accounts.js",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   }
 }

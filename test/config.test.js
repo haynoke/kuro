@@ -16,7 +16,11 @@ test('setup errors identify missing and malformed configuration without creating
   const file = path.join(root, 'config.json');
   fs.writeFileSync(file, '{');
   assert.throws(() => loadConfig(root), /valid JSON/);
-  for (const config of [{ port: 0, accounts: [] }, { accounts: [] }, { accounts: [{ name: 'x', engine: 'other' }] }, { accounts: [{ name: 'x', engine: 'codex' }], voice: 'yes' }]) {
+  for (const empty of [{ accounts: [] }, {}]) {
+    fs.writeFileSync(file, JSON.stringify(empty));
+    assert.deepEqual(loadConfig(root).accounts, []);
+  }
+  for (const config of [{ port: 0, accounts: [] }, { accounts: 'codex' }, { accounts: [{ name: 'x', engine: 'other' }] }, { accounts: [{ name: 'x', engine: 'codex' }], voice: 'yes' }]) {
     fs.writeFileSync(file, JSON.stringify(config));
     assert.throws(() => loadConfig(root));
   }

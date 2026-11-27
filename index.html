@@ -106,7 +106,8 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 .chat-item span.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .chat-item:hover { background: var(--card); color: var(--ink); }
 .chat-item.on { background: var(--card); color: var(--ink); font-weight: 600; }
-.usage-mini { border-top: 1px solid var(--line); padding: 14px 10px 0; display: grid; gap: 12px; font-size: 13px; color: var(--ink-2); }
+/* Any number of accounts: the list scrolls instead of pushing the chats away. */
+.usage-mini { border-top: 1px solid var(--line); padding: 14px 10px 0; display: grid; gap: 12px; font-size: 13px; color: var(--ink-2); flex: 0 1 auto; max-height: 38vh; overflow-y: auto; }
 .usage-mini b { color: var(--ink); font-weight: 600; }
 
 h3.label {
@@ -371,6 +372,7 @@ section.group > h3 { margin-bottom: 10px; padding-left: 4px; }
 @media (min-width: 640px) { .form .two { grid-template-columns: 1.6fr 1fr; } }
 .check { display: flex !important; grid-auto-flow: column; align-items: center; gap: 10px !important; font-weight: 500 !important; color: var(--ink) !important; font-size: 15px !important; }
 .check input { width: 18px; height: 18px; accent-color: var(--ink); }
+.check[hidden] { display: none !important; }
 .form .acts { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ---------- task detail ---------- */
@@ -400,6 +402,27 @@ details.block summary::-webkit-details-marker { display: none; }
 details.block[open] summary { margin-bottom: 10px; }
 .backlink { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; color: var(--ink-2); font-size: 14px; font-weight: 600; margin-left: -4px; }
 .backlink:hover { color: var(--ink); }
+/* ---------- accounts ---------- */
+.group-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 4px 10px; }
+.group-head a { font-size: 13px; font-weight: 600; color: var(--ink-2); text-underline-offset: 3px; }
+.lede { margin: -8px 0 16px; color: var(--ink-2); font-size: 15px; text-wrap: pretty; }
+.acards { display: grid; gap: 8px; }
+.acard { padding: 14px 18px 12px; }
+.acard-top { display: flex; align-items: center; gap: 12px; }
+.acard-top .n { font-size: 13px; font-weight: 700; color: var(--ink-3); width: 20px; flex: none; }
+.acard-top .what { flex: 1; min-width: 0; }
+.acard-top b { display: block; font-weight: 700; overflow-wrap: anywhere; }
+.acard-top small { display: block; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.acard-top .st { display: flex; align-items: center; gap: 8px; flex: none; font-size: 13px; font-weight: 600; }
+.acard .fix { margin: 10px 0 0 32px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.cmd { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); }
+.cmd code { flex: 1; min-width: 0; font: 500 12.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--ink); }
+.acard-acts { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0 24px; }
+.textbtn { border: 0; background: none; border-radius: 8px; padding: 5px 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.textbtn:hover { color: var(--ink); background: var(--sunk); }
+.textbtn:disabled { opacity: .35; cursor: default; background: none; }
+.acard-acts .remove { margin-left: auto; }
+
 /* ---------- image attachments ---------- */
 .ask, .composer { flex-wrap: wrap; }
 .thumbs { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 4px; }
@@ -502,6 +525,7 @@ const ICONS = {
   play: '<path d="M7 5v14l11-7z"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
@@ -544,13 +568,15 @@ const STEP = {
   stop_task: ['stop', 'Stopped task'], resume_task: ['play', 'Resumed task'], accounts: ['eye', 'Checked usage'],
 };
 
-let state = { name: 'Kuro', tasks: [], accounts: [], projects: [], chats: [] };
+let state = { name: 'Kuro', tasks: [], accounts: [], providers: [], projects: [], chats: [] };
+let loaded = false;
 let route = parseRoute();
 let viewData = null;     // chat or task payload for the open view
 let built = '';          // which skeleton is on screen
 let seenMsgs = new Set();
 let taskFilter = 'all';
 let newTaskOpen = false;
+let addAccountOpen = false;
 
 const HAS_KEYBOARD = matchMedia('(hover: hover)').matches;
 const HOTKEY_HINT = HAS_KEYBOARD ? ' (Ctrl+D to talk)' : '';
@@ -599,6 +625,7 @@ function parseRoute() {
   if (a === 'chat' && b) return { name: 'chat', id: b };
   if (a === 'task' && b) return { name: 'task', id: b };
   if (a === 'tasks') return { name: 'tasks' };
+  if (a === 'accounts') return { name: 'accounts' };
   return { name: 'home' };
 }
 function go(hash) { if (location.hash !== hash) location.hash = hash; else onRoute(); }
@@ -714,8 +741,11 @@ function usageWindow(label, w) {
     <div class="bar${low}" role="meter" aria-label="${label} usage left" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${left}"><i style="width:${left}%"></i></div>
     <small class="num">${esc(w.resetsAt ? resetLabel(w.resetsAt) : '')}</small></div>`;
 }
+const accountDot = (a) => (!a.ready ? '' : a.limitedUntil ? 'waiting' : 'running');
+const accountState = (a) => (a.ready ? (a.limitedUntil ? 'Back ' + clock(a.limitedUntil) : 'Ready')
+  : a.signInCommand ? 'Sign in needed' : a.setupError.startsWith('Checking') ? 'Checking…' : 'Needs setup');
 function usageLine(a) {
-  if (!a.ready) return 'needs setup';
+  if (!a.ready) return a.setupError.startsWith('Checking') ? 'checking' : 'needs setup';
   if (a.limitedUntil) return 'back ' + clock(a.limitedUntil);
   const five = leftOf(a.usage && a.usage.fiveHour);
   const week = leftOf(a.usage && a.usage.weekly);
@@ -757,16 +787,17 @@ function renderSide() {
       <button class="iconbtn" data-act="new-chat" title="New chat" aria-label="New chat">${icon('compose')}</button></div>
     <a class="nav-item ${r.name === 'home' ? 'on' : ''}" href="#/">${icon('home')}Home</a>
     <a class="nav-item ${r.name === 'tasks' || r.name === 'task' ? 'on' : ''}" href="#/tasks">${icon('tasks')}Tasks${running ? `<span class="count num">${running} running</span>` : ''}</a>
+    <a class="nav-item ${r.name === 'accounts' ? 'on' : ''}" href="#/accounts">${icon('people')}Accounts${state.accounts.length ? `<span class="count num">${state.accounts.length}</span>` : ''}</a>
     <h3 class="label">Chats</h3>
     <div class="chatlist">${state.chats.length ? state.chats.map((c) => {
       const dot = c.busy ? 'busy' : c.needsYou ? 'blocked' : c.running ? 'running' : '';
       return `<a class="chat-item ${r.name === 'chat' && r.id === c.id ? 'on' : ''}" href="#/chat/${c.id}"><span class="title">${esc(c.title)}</span>${dot ? `<span class="dot ${dot}"></span>` : ''}</a>`;
     }).join('') : '<div class="chat-item">No chats yet</div>'}</div>
-    <div class="usage-mini">${state.accounts.map((a) => `<div class="acct"><span class="dot ${a.limitedUntil ? 'waiting' : 'running'}"></span>
+    ${state.accounts.length ? `<div class="usage-mini">${state.accounts.map((a) => `<div class="acct"><span class="dot ${accountDot(a)}"></span>
       <div class="acct-main">
         <div class="acct-line"><b>${esc(a.name)}</b><span class="t num" title="Usage left: 5-hour window · weekly">${esc(usageLine(a))}</span></div>
         <div class="acct-sub" title="${a.who && a.who.email ? 'Signed in as ' + esc(a.who.email) : signedIn(a)}"><span class="email">${esc(signedIn(a))}</span>${a.who && a.who.plan ? `<span class="plan-chip">${esc(a.who.plan)}</span>` : ''}</div>
-      </div></div>`).join('')}</div>`;
+      </div></div>`).join('')}</div>` : ''}`;
 }
 
 // ready comes from the CLI sign-in check; account details can be missing even then.
@@ -781,8 +812,10 @@ function renderTop() {
     left = `<button class="iconbtn" data-act="back" aria-label="Back">${icon('back')}</button>`;
     if (r.name === 'chat') mid = viewData ? viewData.title : '';
     if (r.name === 'tasks') mid = 'Tasks';
+    if (r.name === 'accounts') mid = 'Accounts';
   }
-  if (r.name === 'home') right = `<a class="iconbtn" href="#/tasks" aria-label="Tasks">${icon('tasks')}</a>` + right;
+  if (r.name === 'home') right = `<a class="iconbtn" href="#/accounts" aria-label="Accounts">${icon('people')}</a><a class="iconbtn" href="#/tasks" aria-label="Tasks">${icon('tasks')}</a>` + right;
+  if (r.name === 'accounts') right = '';
   if (r.name === 'chat') right = `<button class="iconbtn" data-act="rename" aria-label="Rename chat">${icon('pen')}</button><button class="iconbtn" data-act="delete-chat" aria-label="Delete chat">${icon('trash')}</button>`;
   $('#topbar').innerHTML = `${left}<div class="mid">${esc(mid)}</div>${right}`;
 }
@@ -794,6 +827,7 @@ function render() {
   if (route.name === 'home') renderHome();
   else if (route.name === 'chat') renderChat();
   else if (route.name === 'tasks') renderTasks();
+  else if (route.name === 'accounts') renderAccounts();
   else renderTask();
   document.querySelectorAll('[data-act="new-chat"]').forEach((button) => { button.hidden = !state.features?.chat; });
   document.querySelectorAll('[data-act="voice"]').forEach((button) => { button.hidden = !state.features?.voice; });
@@ -824,27 +858,81 @@ function renderHome() {
   if (needs.length) sum.push(`${needs.length} need${needs.length === 1 ? 's' : ''} you`);
   const out = state.accounts.filter((a) => a.limitedUntil);
   const ready = state.accounts.filter((a) => a.ready && !a.limitedUntil);
-  const usage = ready.length ? ready.map((a) => a.name).join(' and ') + ' ready.'
+  const usage = !state.accounts.length ? (loaded ? 'No accounts yet.' : '')
+    : ready.length ? (state.accounts.length > 2 ? `${ready.length} of ${state.accounts.length} accounts ready.` : ready.map((a) => a.name).join(' and ') + ' ready.')
     : out.length ? `Waiting for usage; next reset ${clock(Math.min(...out.map((a) => a.limitedUntil)))}.`
-    : 'No provider is ready. Check setup below.';
+    : state.accounts.some((a) => accountState(a) === 'Checking…') ? 'Checking sign-ins.' : 'No account is ready. Check setup below.';
+  const broken = state.accounts.filter((a) => accountState(a) !== 'Checking…' && !a.ready);
   $('#sum').textContent = (sum.length ? sum.join(', ') + '. ' : 'Nothing running. ') + usage;
 
   const recent = state.tasks.filter((t) => ['running', 'waiting', 'queued'].includes(t.status)).slice(0, 6);
   $('#home-body').innerHTML = `
-    ${!state.features?.chat ? '<section class="group"><a class="pill" href="#/tasks">Start a coding task</a><p class="meta">Chat is optional. Enable it with Ollama in config.json.</p></section>' : ''}
-    ${state.accounts.some((a) => a.setupError) ? `<section class="group"><h3 class="label">Provider setup</h3><div class="card block">${state.accounts.filter((a) => a.setupError).map((a) => `<p>${esc(a.name)}: ${esc(a.setupError)}</p>`).join('')}</div></section>` : ''}
+    ${loaded && !state.accounts.length ? '<section class="group"><div class="card empty"><p>Add a coding agent account to get started. Add as many as you like.</p><button class="pill" data-act="add-first">Add an account</button></div></section>'
+      : !state.features?.chat ? '<section class="group"><a class="pill" href="#/tasks">Start a coding task</a><p class="meta">Chat is optional. Enable it with Ollama in config.json.</p></section>' : ''}
+    ${broken.length ? `<section class="group"><h3 class="label">Account setup</h3><div class="card block">${broken.map((a) => `<p>${esc(a.name)}: ${esc(a.setupError)}</p>`).join('')}<a href="#/accounts">Manage accounts</a></div></section>` : ''}
     ${needs.length ? `<section class="group"><h3 class="label">Needs you</h3>${needs.map(needsCard).join('')}</section>` : ''}
     <section class="group"><h3 class="label">Working on</h3>
       ${recent.length ? `<div class="tasks-grid two">${recent.map(taskCard).join('')}</div>` : '<div class="card empty">No tasks running. Open Tasks and choose New task.</div>'}</section>
     <section class="group phone-only"><h3 class="label">Chats</h3>
       ${state.chats.length ? `<div class="card chats-card">${state.chats.slice(0, 8).map(chatRow).join('')}</div>` : `<div class="card empty">No chats yet.</div>`}</section>
-    <section class="group"><h3 class="label">Usage</h3>
-      <div class="usage">${state.accounts.map((a) => `<div class="card ucard">${a.who && a.who.plan ? `<span class="plan">${esc(a.who.plan)}</span>` : ''}<div class="who"><span class="dot ${a.limitedUntil ? 'waiting' : 'running'}"></span>${esc(a.name)}</div>
-        <div class="state t">${esc(!a.ready ? 'Needs setup' : a.limitedUntil ? 'Back ' + clock(a.limitedUntil) : 'Ready')}</div>
+    ${state.accounts.length ? `<section class="group"><div class="group-head"><h3 class="label">Usage</h3><a href="#/accounts">Manage accounts</a></div>
+      <div class="usage">${state.accounts.map((a) => `<div class="card ucard">${a.who && a.who.plan ? `<span class="plan">${esc(a.who.plan)}</span>` : ''}<div class="who"><span class="dot ${accountDot(a)}"></span>${esc(a.name)}</div>
+        <div class="state t">${esc(accountState(a))}</div>
         ${a.limitedUntil ? `<button data-act="clear-limit" data-name="${esc(a.name)}">It's back, mark ready</button>` : ''}
         <div class="wins${a.usage && Date.now() - a.usage.at > 30 * 60e3 ? ' stale' : ''}">${usageWindow('5-hour', a.usage && a.usage.fiveHour)}${usageWindow('Weekly', a.usage && a.usage.weekly)}</div>
         ${a.engine === 'claude' ? `<p class="win-note">Limits for Kuro's agents (Claude Code). The Claude app counts its own usage separately.</p>` : ''}
-        <span class="email" title="Signed in account">${esc([signedIn(a), a.usage ? 'updated ' + ago(a.usage.at) + (ago(a.usage.at) === 'now' ? '' : ' ago') : 'no usage data yet'].join(' · '))}</span></div>`).join('')}</div></section>`;
+        <span class="email" title="Signed in account">${esc([signedIn(a), a.usage ? 'updated ' + ago(a.usage.at) + (ago(a.usage.at) === 'now' ? '' : ' ago') : 'no usage data yet'].join(' · '))}</span></div>`).join('')}</div></section>` : ''}`;
+}
+
+// ---------- accounts ----------
+function renderAccounts() {
+  if (built !== 'accounts') {
+    $('#view').innerHTML = `<div class="page col">
+      <div class="page-head"><h1>accounts</h1><button class="pill" data-act="toggle-account">Add account</button></div>
+      <p class="lede">${esc(state.name)} works down this list. A task stays on its account until that one runs out of usage or keeps failing, then moves to another.</p>
+      <div id="new-account"></div><div id="account-list"></div></div>`;
+    built = 'accounts';
+    renderNewAccount();
+  }
+  // The providers arrive with the first state, which may come after the page opens.
+  if (addAccountOpen && !$('#account-form')) renderNewAccount();
+  syncNewAccount();
+  const list = state.accounts.map((a, i) => `<div class="card acard">
+    <div class="acard-top"><span class="n num">${i + 1}</span>
+      <span class="what"><b>${esc(a.name)}</b><small>${esc([a.provider, a.who && a.who.email, a.who && a.who.plan].filter(Boolean).join(' · '))}</small></span>
+      <span class="st"><span class="dot ${accountDot(a)}"></span>${esc(accountState(a))}</span></div>
+    ${a.signInCommand ? `<div class="fix">To sign in, run this in the Kuro folder on your PC. This page updates by itself.<div class="cmd"><code>${esc(a.signInCommand)}</code><button class="textbtn" data-act="copy-command" data-command="${esc(a.signInCommand)}">Copy</button></div></div>`
+      : !a.ready ? `<div class="fix">${esc(a.setupError)}</div>` : ''}
+    ${a.working ? `<div class="fix">Working on task #${a.working}</div>` : ''}
+    <div class="acard-acts">
+      <button class="textbtn" data-act="move-account" data-name="${esc(a.name)}" data-to="${i}" ${i ? '' : 'disabled'} aria-label="Move ${esc(a.name)} up">Move up</button>
+      <button class="textbtn" data-act="move-account" data-name="${esc(a.name)}" data-to="${i + 2}" ${i < state.accounts.length - 1 ? '' : 'disabled'} aria-label="Move ${esc(a.name)} down">Move down</button>
+      ${a.limitedUntil ? `<button class="textbtn" data-act="clear-limit" data-name="${esc(a.name)}">Mark ready</button>` : ''}
+      ${!a.ready ? '<button class="textbtn" data-act="check-accounts">Check again</button>' : ''}
+      <button class="textbtn remove" data-act="remove-account" data-name="${esc(a.name)}">Remove</button></div></div>`).join('');
+  const html = list ? `<div class="acards">${list}</div>` : `<div class="card empty">${loaded ? 'No accounts yet. Add one to start running tasks.' : 'Loading…'}</div>`;
+  // Redraw only on change, so a focused button survives the regular refresh.
+  const box = $('#account-list');
+  if (box.dataset.sig !== html) { box.innerHTML = html; box.dataset.sig = html; }
+}
+function renderNewAccount() {
+  const box = $('#new-account');
+  if (!box) return;
+  if (!addAccountOpen || !state.providers.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<form class="card form" id="account-form">
+    <div class="two"><label>Name<input name="label" maxlength="60" autocomplete="off" placeholder="Optional, like Work or Personal"></label>
+      <label>Provider<select name="engine">${state.providers.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('')}</select></label></div>
+    <label class="check" id="use-existing"><input type="checkbox" name="existing" checked>Use the sign-in already on this PC</label>
+    <div class="error" id="account-err"></div>
+    <div class="acts"><button class="pill ghost" type="button" data-act="toggle-account">Cancel</button><button class="pill" type="submit">Add account</button></div></form>`;
+  syncNewAccount();
+}
+// Only one account per provider can use the sign-in already on the PC.
+function syncNewAccount() {
+  const form = $('#account-form');
+  if (!form) return;
+  const provider = state.providers.find((p) => p.id === form.engine.value);
+  $('#use-existing').hidden = !(provider && provider.canUseExisting);
 }
 
 function renderChat() {
@@ -948,12 +1036,15 @@ function renderNewTask() {
   if (!box) return;
   if (!newTaskOpen) { box.innerHTML = ''; return; }
   const opts = state.projects.map((p) => `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join('');
+  const used = state.providers.filter((p) => state.accounts.some((a) => a.engine === p.id));
   box.innerHTML = `<form class="card form" id="task-form">
     <label>What should get done?<textarea name="prompt" placeholder="Describe the goal, what done looks like, and how to check it."></textarea></label>
     <div class="two"><label>Folder<input name="cwd" list="projects" value="" placeholder="Empty = a fresh folder for this task"><datalist id="projects">${opts}</datalist></label>
-      <label>Start with<select name="prefer"><option value="auto">Whichever is free</option><option value="claude">Claude</option><option value="codex">Codex</option></select></label></div>
+      <label>Start with<select name="prefer"><option value="auto">First free account</option>
+      ${used.length > 1 ? `<optgroup label="Any account from">${used.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('')}</optgroup>` : ''}
+      ${state.accounts.length ? `<optgroup label="This account">${state.accounts.map((a) => `<option value="${esc('account:' + a.name)}">${esc(a.name)}</option>`).join('')}</optgroup>` : ''}</select></label></div>
     <label>Model<select name="model"><option value="">Default (provider CLI setting)</option>
-      ${['claude', 'codex'].map((eng) => `<optgroup label="${eng === 'claude' ? 'Claude' : 'Codex'}">${(state.models || []).filter((m) => m.engine === eng).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+      ${used.map((p) => `<optgroup label="${esc(p.label)}">${(state.models || []).filter((m) => m.engine === p.id).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</optgroup>`).join('')}</select></label>
     <label>Effort<select name="effort">${EFFORTS.map(([v, name, desc]) => `<option value="${v}" ${v === currentEffort() ? 'selected' : ''}>${name}: ${desc}</option>`).join('')}</select></label>
     <div class="error" id="task-err"></div>
     <div class="acts"><button class="pill ghost" type="button" data-act="toggle-new">Cancel</button><button class="pill" type="submit">Start task</button></div></form>`;
@@ -1016,7 +1107,7 @@ function nowCard(t) {
   }
   if (t.status === 'waiting') {
     return `<div class="card now"><div class="now-top"><span class="dot waiting"></span><b>Waiting for usage</b></div>
-      <div class="now-step"><span>Starts again ${t.waitUntil ? 'at ' + clock(t.waitUntil) : 'soon'}, on whichever model is back first.</span></div></div>`;
+      <div class="now-step"><span>Starts again ${t.waitUntil ? 'at ' + clock(t.waitUntil) : 'soon'}, or sooner if another account is free.</span></div></div>`;
   }
   if (t.status === 'queued') {
     return `<div class="card now"><div class="now-top"><span class="dot queued"></span><b>Starting…</b></div>
@@ -1054,6 +1145,7 @@ async function refresh() {
     ]);
     if (r !== route) return;
     state = s;
+    loaded = true;
     viewData = v;
     if ((r.name === 'chat' || r.name === 'task') && !v) { go('#/'); return; }
     failures = 0;
@@ -1274,7 +1366,7 @@ document.addEventListener('drop', (e) => {
 const EFFORTS = [
   ['low', 'Low', 'Quickest. One agent, no review.'],
   ['medium', 'Medium', 'Quick and solid. The agent checks its own work.'],
-  ['high', 'High', 'Thorough. Another model reviews the result.'],
+  ['high', 'High', 'Thorough. Another provider reviews it, if you have one.'],
 ];
 const effortName = (v) => (EFFORTS.find((e) => e[0] === v) || EFFORTS[1])[1];
 function currentEffort() {
@@ -1363,6 +1455,7 @@ document.addEventListener('keydown', (e) => {
     e.target.form.requestSubmit();
   }
 });
+document.addEventListener('change', (e) => { if (e.target.matches('#account-form select')) syncNewAccount(); });
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -1386,13 +1479,20 @@ document.addEventListener('submit', async (e) => {
       await api(`/api/tasks/${route.id}/message`, { text });
       box.value = ''; grow(box); f.querySelector('.send').disabled = true;
       refresh();
+    } else if (f.id === 'account-form') {
+      const useExisting = !$('#use-existing').hidden && f.existing.checked;
+      await api('/api/accounts', { engine: f.engine.value, name: f.label.value, useExisting });
+      addAccountOpen = false;
+      renderNewAccount();
+      refresh();
     } else if (f.id === 'task-form') {
       const { id } = await api('/api/tasks', { prompt: f.prompt.value, cwd: f.cwd.value, prefer: f.prefer.value, effort: f.effort.value, model: f.model.value || undefined });
       newTaskOpen = false;
       go('#/task/' + id);
     }
   } catch (err) {
-    if (f.id === 'task-form') $('#task-err').textContent = err.message; else alert(err.message);
+    const box = f.id === 'task-form' ? $('#task-err') : f.id === 'account-form' ? $('#account-err') : null;
+    if (box) box.textContent = err.message; else alert(err.message);
   }
 });
 // Effort menu: pick with a click, arrow keys, Enter; Esc or a click elsewhere closes it.
@@ -1435,6 +1535,21 @@ document.addEventListener('click', async (e) => {
     else if (act === 'back') { history.length > 1 ? history.back() : go('#/'); }
     else if (act === 'toggle-new') { newTaskOpen = !newTaskOpen; renderNewTask(); if (newTaskOpen) $('#task-form textarea').focus(); }
     else if (act === 'clear-limit') { await api(`/api/accounts/${encodeURIComponent(el.dataset.name)}/clear`, {}); refresh(); }
+    else if (act === 'toggle-account') { addAccountOpen = !addAccountOpen; renderNewAccount(); if (addAccountOpen) $('#account-form input')?.focus(); }
+    else if (act === 'add-first') { addAccountOpen = true; go('#/accounts'); }
+    else if (act === 'check-accounts') {
+      el.disabled = true; el.textContent = 'Checking…';
+      await api('/api/accounts/check', {});
+      delete $('#account-list').dataset.sig;
+      refresh();
+    }
+    else if (act === 'move-account') { await api(`/api/accounts/${encodeURIComponent(el.dataset.name)}/move`, { position: Number(el.dataset.to) }); refresh(); }
+    else if (act === 'remove-account') {
+      const a = state.accounts.find((x) => x.name === el.dataset.name);
+      const busy = a && a.working ? ` Its current round on task #${a.working} finishes first.` : '';
+      if (confirm(`Remove ${el.dataset.name}? ${state.name} stops using it.${busy} Its sign-in stays on this PC.`)) { await api(`/api/accounts/${encodeURIComponent(el.dataset.name)}/remove`, {}); refresh(); }
+    }
+    else if (act === 'copy-command') { el.textContent = (await copyText(el.dataset.command)) ? 'Copied' : 'Select and copy'; }
     else if (act === 'rename') {
       const title = prompt('Rename chat', viewData ? viewData.title : '');
       if (title && title.trim()) { await api(`/api/chats/${route.id}/rename`, { title }); refresh(); }

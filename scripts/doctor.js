@@ -1,7 +1,8 @@
 const path = require('node:path');
 const { loadConfig } = require('../lib/config');
 const { createAccess } = require('../lib/access');
-const { checkedArgs, probe } = require('../lib/providers');
+const { PROVIDERS, checkedArgs } = require('../lib/providers');
+const { accountStatus } = require('../lib/accounts');
 
 async function main() {
   const config = loadConfig(path.resolve(__dirname, '..'));
@@ -10,9 +11,8 @@ async function main() {
   let ready = 0;
   for (const account of config.accounts) {
     try {
-      checkedArgs(account.engine, config[`${account.engine}Args`]);
-      const command = config[`${account.engine}Path`] || account.engine;
-      const result = await probe(command, account.engine === 'claude' ? ['auth', 'status'] : ['login', 'status'], { ...process.env, ...(account.env || {}) });
+      checkedArgs(account.engine, config[PROVIDERS[account.engine].argsKey]);
+      const result = await accountStatus(config, account);
       if (!result.ready) throw new Error(result.error);
       ready++;
       console.log(`${account.name}: signed in and ready`);
@@ -32,8 +32,9 @@ async function main() {
       process.exitCode = 1;
     }
   }
-  if (!ready) { console.error('No provider is ready. Fix the setup above before submitting a task.'); process.exitCode = 1; }
-  else console.log(`${ready} provider(s) ready. Start with node server.js, then open http://localhost:${config.port}/#/tasks`);
+  if (!config.accounts.length) { console.error(`No accounts yet. Add one: node scripts/accounts.js add <${Object.keys(PROVIDERS).join('|')}>`); process.exitCode = 1; }
+  else if (!ready) { console.error('No account is ready. Fix the setup above before submitting a task.'); process.exitCode = 1; }
+  else console.log(`${ready} of ${config.accounts.length} account(s) ready. Start with node server.js, then open http://localhost:${config.port}`);
 }
 
 main().catch((error) => { console.error('Kuro setup: ' + error.message); process.exitCode = 1; });

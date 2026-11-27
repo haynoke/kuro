@@ -1,5 +1,5 @@
-﻿// Task Runner: hands big tasks to Claude Code and Codex, keeps them going
-// through usage limits, and shows progress on a small web page.
+﻿// Kuro: delegates tasks to coding agents across any number of accounts, keeps
+// them going through usage limits, and shows progress on a small web page.
 // No npm packages needed. Start with: node server.js
 
 const http = require('http');
@@ -7,11 +7,13 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const crypto = require('crypto');
-const { loadConfig } = require('./lib/config');
+const { loadConfig, configPath } = require('./lib/config');
 const { readJson, writeJson } = require('./lib/storage');
 const { createAccess } = require('./lib/access');
-const { checkedArgs, cliArgs, probe } = require('./lib/providers');
+const { PROVIDERS, checkedArgs, cliArgs } = require('./lib/providers');
 const { commandSpec } = require('./lib/commands');
+const accountsLib = require('./lib/accounts');
+const { childEnv, commandFor, profileDir, fingerprint } = accountsLib;
 
 const ROOT = __dirname;
 let config;
@@ -37,6 +39,7 @@ let saveTimer = null;
 let shuttingDown = false;
 let providersReady = false;
 const providerHealth = new Map();
+const checking = new Map(); // account name -> sign-in check in flight
 
 // Tasks that were mid-round when the runner stopped get picked back up.
 for (const t of tasks) {
@@ -95,7 +98,11 @@ function accountAvailable(acc) {
   return !s || !s.limitedUntil || s.limitedUntil <= Date.now();
 }
 
+// Still in the list, pointing at the same sign-in (it can be removed mid-turn).
+const isCurrent = (acc) => config.accounts.some((a) => a.name === acc.name && fingerprint(a) === fingerprint(acc));
+
 function markLimited(acc, until, note) {
+  if (!isCurrent(acc)) return;
   accountState[acc.name] = { ...(accountState[acc.name] || {}), limitedUntil: until, note };
   save();
 }
@@ -105,17 +112,20 @@ function markLimited(acc, until, note) {
 // session files (the Codex app does too), so they stay fresh whenever either is used.
 
 function recordUsage(acc, fiveHour, weekly) {
+  if (!isCurrent(acc)) return;
   const s = accountState[acc.name] = accountState[acc.name] || {};
   s.usage = { fiveHour, weekly, at: Date.now() };
   save();
 }
 
-let codexUsageCache = { at: 0, value: null };
+const codexUsageCache = new Map(); // profile folder -> { at, value }
+const codexHomeOf = (acc) => (acc && profileDir(acc)) || process.env.CODEX_HOME || path.join(process.env.USERPROFILE || '', '.codex');
 function codexUsage(acc) {
-  if (Date.now() - codexUsageCache.at < 20000) return codexUsageCache.value;
+  const home = codexHomeOf(acc);
+  const cached = codexUsageCache.get(home);
+  if (cached && Date.now() - cached.at < 20000) return cached.value;
   let value = null;
   try {
-    const home = (acc.env && acc.env.CODEX_HOME) || process.env.CODEX_HOME || path.join(process.env.USERPROFILE || '', '.codex');
     const root = path.join(home, 'sessions');
     // Newest day folder first (sessions/YYYY/MM/DD), newest file in it.
     const newest = (dir) => fs.readdirSync(dir).filter((n) => !n.startsWith('.')).sort().reverse();
@@ -142,13 +152,15 @@ function codexUsage(acc) {
       break;
     }
   } catch { value = null; }
-  codexUsageCache = { at: Date.now(), value };
+  codexUsageCache.set(home, { at: Date.now(), value });
   return value;
 }
 
 // On first start, take Claude's latest numbers from the task logs already on disk.
 function seedClaudeUsage() {
-  const acc = config.accounts.find((a) => a.engine === 'claude');
+  // Old logs do not say which sign-in they came from, so only do this when there is one.
+  const claude = config.accounts.filter((a) => a.engine === 'claude');
+  const acc = claude.length === 1 ? claude[0] : null;
   if (!acc || ((accountState[acc.name] || {}).usage)) return;
   let best = null;
   try {
@@ -178,17 +190,18 @@ function usageOf(acc) {
   return !stored || (fromFiles && fromFiles.at > stored.at) ? fromFiles : stored;
 }
 
+// The list order in config.json is the priority order.
 function pickAccount(task, { engineNot } = {}) {
-  let list = config.accounts.filter(accountAvailable);
+  let list = config.accounts.filter((a) => accountAvailable(a) && !(task.failedAccounts || []).includes(a.name));
   if (engineNot) list = list.filter((a) => a.engine !== engineNot);
   if (!list.length) return null;
   const current = list.find((a) => a.name === task.account);
   if (current && !engineNot) return current;
-  if (task.prefer && task.prefer !== 'auto') {
-    const preferred = list.find((a) => a.engine === task.prefer);
-    if (preferred) return preferred;
-  }
-  // Prefer an account that already has a session for this task.
+  // "Start with" names one account ("account:Name") or any account of one provider.
+  const prefer = task.prefer || 'auto';
+  const preferred = list.find((a) => (prefer.startsWith('account:') ? a.name === prefer.slice(8) : a.engine === prefer));
+  if (preferred) return preferred;
+  // Then an account that already has a session for this task.
   const withSession = list.find((a) => task.sessions && task.sessions[a.name]);
   return withSession || list[0];
 }
@@ -238,43 +251,88 @@ function parseReset(text) {
 
 // ---------- running the CLIs ----------
 
-function childEnv(acc) {
-  const env = { ...process.env };
-  // Drop variables from whatever launched this server (for example a Claude
-  // desktop session), so the workers start like a normal terminal would.
-  for (const k of Object.keys(env)) {
-    if (/^CLAUDE/i.test(k) || k === 'ANTHROPIC_BASE_URL' || k === 'KURO_AUTH_TOKEN') delete env[k];
-  }
-  const result = { ...env, ...(acc.env || {}) };
-  delete result.KURO_AUTH_TOKEN;
-  return result;
-}
-
-// Use the installed CLI, or an explicit path, without guessing from personal settings.
-function codexCommand() {
-  return config.codexPath || 'codex';
-}
-
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
   if (process.platform === 'win32') execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
   else child.kill('SIGTERM');
 }
 
-async function checkProviders() {
-  await Promise.all(config.accounts.map(async (acc) => {
+// Asks the provider CLI whether this account is signed in.
+function checkAccount(acc) {
+  const key = fingerprint(acc);
+  const inFlight = checking.get(acc.name);
+  if (inFlight?.key === key) return inFlight.done;
+  const entry = { key };
+  entry.done = (async () => {
+    let health;
     try {
-      checkedArgs(acc.engine, acc.engine === 'codex' ? config.codexArgs : config.claudeArgs);
-      const command = acc.engine === 'codex' ? codexCommand() : (config.claudePath || 'claude');
-      const health = await probe(command, acc.engine === 'claude' ? ['auth', 'status'] : ['login', 'status'], childEnv(acc));
-      providerHealth.set(acc.name, health);
-      if (!health.ready) console.warn(`${acc.name}: ${health.error}`);
+      checkedArgs(acc.engine, config[PROVIDERS[acc.engine].argsKey]);
+      health = await accountsLib.accountStatus(config, acc);
     } catch (error) {
-      providerHealth.set(acc.name, { ready: false, error: error.message });
-      console.warn(`${acc.name}: ${error.message}`);
+      health = { ready: false, error: error.message };
     }
-  }));
+    if (checking.get(acc.name) !== entry) return;
+    checking.delete(acc.name);
+    if (!isCurrent(acc)) return;
+    // Say it once, not on every recheck.
+    if (!health.ready && providerHealth.get(acc.name)?.error !== health.error) console.warn(`${acc.name}: ${health.error}`);
+    providerHealth.set(acc.name, { ...health, at: Date.now() });
+    identityCache.delete(acc.name);
+  })();
+  checking.set(acc.name, entry);
+  return entry.done;
+}
+
+async function checkProviders() {
+  await Promise.all(config.accounts.map(checkAccount));
   providersReady = true;
+}
+
+// Drops saved state for accounts that were removed or now use a different sign-in,
+// so a reused name never resumes someone else's session.
+function syncAccounts() {
+  const current = new Map(config.accounts.map((a) => [a.name, fingerprint(a)]));
+  const stale = new Set(Object.keys(accountState).filter((name) => !current.has(name)));
+  for (const t of tasks) for (const name of Object.keys(t.sessions || {})) if (!current.has(name)) stale.add(name);
+  for (const name of new Set([...current.keys(), ...providerHealth.keys()])) {
+    const known = accountState[name]?.profile;
+    if (!current.has(name) || (known && known !== current.get(name))) stale.add(name);
+  }
+  for (const name of stale) {
+    delete accountState[name];
+    providerHealth.delete(name);
+    checking.delete(name);
+    identityCache.delete(name);
+    for (const t of tasks) {
+      if (t.sessions) delete t.sessions[name];
+      if (t.failedAccounts) t.failedAccounts = t.failedAccounts.filter((n) => n !== name);
+    }
+  }
+  for (const [name, profile] of current) accountState[name] = { ...accountState[name], profile };
+  save();
+}
+
+// Accounts can change while Kuro runs, from the web page or scripts/accounts.js.
+const CONFIG_FILE = configPath(ROOT);
+const configStamp = () => { try { const s = fs.statSync(CONFIG_FILE); return s.mtimeMs + ':' + s.size; } catch { return ''; } };
+let seenStamp = configStamp();
+
+function reloadAccounts() {
+  const stamp = configStamp();
+  if (stamp === seenStamp) return;
+  seenStamp = stamp;
+  let next;
+  try { next = loadConfig(ROOT).accounts; }
+  catch (error) { return console.warn('Kept the previous accounts: ' + error.message); }
+  const before = new Map(config.accounts.map((a) => [a.name, JSON.stringify(a)]));
+  config.accounts = next;
+  syncAccounts();
+  for (const acc of next) {
+    if (before.get(acc.name) === JSON.stringify(acc)) continue;
+    providerHealth.delete(acc.name);
+    checking.delete(acc.name);
+    checkAccount(acc);
+  }
 }
 
 // Runs one turn of a CLI. Resolves with
@@ -287,9 +345,8 @@ function runCli(task, acc, prompt, sessionId, { onActivity, onSession }) {
     }, { cwd: task.cwd, sessionId, effort: effortOf(task.effort),
       model: task.model?.engine === acc.engine ? task.model.id : undefined, progressDir: taskDir(task) });
 
-    const command = acc.engine === 'codex' ? codexCommand() : (config.claudePath || 'claude');
     const env = childEnv(acc);
-    const spec = commandSpec(command, env);
+    const spec = commandSpec(commandFor(config, acc.engine), env);
     const child = spawn(spec.file, [...spec.args, ...args], { cwd: task.cwd, env, windowsHide: true });
     running.set(task.id, child);
     appendLog(task, `\n===== ${new Date().toISOString()} ${acc.name} ${sessionId ? 'resume ' + sessionId : 'new session'} =====\n${prompt}\n----- output -----\n`);
@@ -451,17 +508,19 @@ followed by a numbered list of what must change.`;
 async function step(task) {
   task.status = 'running';
   task.waitUntil = null;
+  task.waitReason = null;
   save();
 
   const reviewing = task.phase === 'review';
   let acc;
+  const workerEngine = task.engine || engineOf(task.account);
   if (reviewing) {
-    acc = pickAccount(task, { engineNot: engineOf(task.account) });
+    acc = pickAccount(task, { engineNot: workerEngine });
     if (!acc) {
-      const anyOther = config.accounts.some((a) => a.engine !== engineOf(task.account));
+      const anyOther = config.accounts.some((a) => a.engine !== workerEngine);
       task.status = 'done';
       task.phase = 'work';
-      addEvent(task, anyOther ? 'Finished. Review skipped: the other model is out of usage.' : 'Finished.');
+      addEvent(task, anyOther ? 'Finished. Review skipped: no account from another provider is available.' : 'Finished.');
       return;
     }
   } else {
@@ -469,15 +528,19 @@ async function step(task) {
     if (!acc) {
       task.waitUntil = earliestReset();
       task.status = task.waitUntil ? 'waiting' : 'blocked';
+      task.waitReason = task.waitUntil ? 'usage' : null;
+      // Once it needs you, the next attempt starts with every account again.
+      if (!task.waitUntil) task.failedAccounts = [];
       addEvent(task, task.waitUntil
         ? 'Every available account is out of usage. Waiting until ' + new Date(task.waitUntil).toLocaleString() + '.'
-        : 'No provider is ready. ' + config.accounts.map((a) => `${a.name}: ${providerHealth.get(a.name)?.error || 'check sign-in'}`).join(' ') + ' Restart Kuro after fixing setup, then press Resume.');
+        : !config.accounts.length ? 'Needs you: there are no accounts yet. Add one on the Accounts page, then press Resume.'
+          : 'No account is ready. ' + config.accounts.map((a) => `${a.name}: ${providerHealth.get(a.name)?.error || 'check sign-in'}`).join(' ') + ' Fix this, then press Resume.');
       return;
     }
   }
 
   if (!reviewing && task.account && task.account !== acc.name) addEvent(task, `Switching from ${task.account} to ${acc.name}.`);
-  if (!reviewing) task.account = acc.name;
+  if (!reviewing) { task.account = acc.name; task.engine = acc.engine; }
   task.sessions = task.sessions || {};
   const sessionId = reviewing ? null : task.sessions[acc.name];
   const prompt = reviewing ? reviewPrompt(task) : workPrompt(task, acc);
@@ -505,7 +568,7 @@ async function step(task) {
       task.updated = Date.now();
     },
     // Keep the session as soon as the agent reports it, so a restart mid-round can resume it.
-    onSession: (id) => { if (!reviewing) { task.sessions[acc.name] = id; flushState(); } },
+    onSession: (id) => { if (!reviewing && isCurrent(acc)) { task.sessions[acc.name] = id; flushState(); } },
   });
   turn.ended = Date.now();
   turn.reply = (res.text || res.errorText || '').slice(0, 20000);
@@ -514,7 +577,7 @@ async function step(task) {
 
   if (shuttingDown || task.deleted) return;
   if (task.status === 'stopped') { task.finished = Date.now(); addEvent(task, 'Stopped by you.'); return; }
-  if (!reviewing && res.sessionId) task.sessions[acc.name] = res.sessionId;
+  if (!reviewing && res.sessionId && isCurrent(acc)) task.sessions[acc.name] = res.sessionId;
 
   if (res.limitHit) {
     const until = res.resetAt || parseReset(res.errorText + '\n' + res.text);
@@ -536,20 +599,21 @@ async function step(task) {
     task.errors = (task.errors || 0) + 1;
     addEvent(task, `${acc.name} failed: ${res.errorText.slice(0, 500)}`);
     if (task.errors >= 3) {
-      // Try the other engine before giving up.
-      const other = config.accounts.find((a) => a.name !== acc.name && accountAvailable(a));
-      if (other && !task.triedOther) {
-        task.triedOther = true;
+      // Set this account aside and move on while there is one left to try.
+      task.failedAccounts = [...new Set([...(task.failedAccounts || []), acc.name])];
+      const left = config.accounts.some((a) => providerHealth.get(a.name)?.ready && !task.failedAccounts.includes(a.name));
+      if (left || reviewing) {
         task.errors = 0;
-        task.account = other.name;
         task.status = 'queued';
-        addEvent(task, `Trying ${other.name} instead.`);
+        addEvent(task, `Setting ${acc.name} aside for this task.`);
       } else {
         task.status = 'failed';
+        task.failedAccounts = [];
         addEvent(task, 'Stopped after repeated errors. Press Resume to try again.');
       }
     } else {
       task.status = 'waiting';
+      task.waitReason = 'error';
       task.waitUntil = Date.now() + 60 * 1000 * task.errors;
     }
     return;
@@ -584,6 +648,7 @@ async function step(task) {
     return;
   }
 
+  task.failedAccounts = [];
   task.rounds += 1;
   const marks = [...res.text.matchAll(/TASK STATUS:\s*(DONE|CONTINUE|BLOCKED)/gi)];
   const mark = marks.length ? marks[marks.length - 1][1].toUpperCase() : 'CONTINUE';
@@ -619,7 +684,13 @@ function engineOf(accountName) {
 
 function tick() {
   if (shuttingDown || !providersReady) return;
+  reloadAccounts();
   const now = Date.now();
+  // Notice sign-ins finished after startup without needing a restart.
+  for (const a of config.accounts) {
+    const health = providerHealth.get(a.name);
+    if (health && !health.ready && now - health.at > 30000) checkAccount(a);
+  }
   // Remember when a task finished, so its total time stops counting.
   for (const t of tasks) {
     const over = ['done', 'failed', 'stopped'].includes(t.status);
@@ -628,7 +699,10 @@ function tick() {
     if (!over && t.finished) t.finished = null;
   }
   for (const t of tasks) {
-    if (t.status === 'waiting' && t.waitUntil && t.waitUntil <= now) t.status = 'queued';
+    if (t.status !== 'waiting') continue;
+    if (t.waitUntil && t.waitUntil <= now) t.status = 'queued';
+    // An account added, signed in or marked ready ends the wait early.
+    else if (t.waitReason === 'usage' && pickAccount(t)) { t.status = 'queued'; addEvent(t, 'An account is available. Continuing.'); }
   }
   let busy = tasks.filter((t) => t.status === 'running').length;
   for (const t of tasks) {
@@ -665,26 +739,45 @@ const CLAUDE_MODELS = [
   { id: 'sonnet', label: 'Claude Sonnet', note: 'fast and capable, uses less of the limits' },
   { id: 'haiku', label: 'Claude Haiku', note: 'quickest and lightest' },
 ];
-const codexHome = () => process.env.CODEX_HOME || path.join(process.env.USERPROFILE || '', '.codex');
+// Every Codex profile keeps its own files; the default one covers a fresh install.
+const codexHomes = () => [...new Set([...config.accounts.filter((a) => a.engine === 'codex'), null].map(codexHomeOf))];
 function codexModels() {
-  try {
-    const j = JSON.parse(fs.readFileSync(path.join(codexHome(), 'models_cache.json'), 'utf8'));
-    return (j.models || []).filter((m) => m.visibility === 'list').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
-  } catch { return []; }
+  const found = new Map();
+  for (const home of codexHomes()) {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(home, 'models_cache.json'), 'utf8'));
+      for (const m of j.models || []) if (m.visibility === 'list' && !found.has(m.slug)) found.set(m.slug, { id: m.slug, label: m.display_name || m.slug });
+    } catch {}
+  }
+  return [...found.values()];
 }
 function codexDefaultModel() {
-  try { return (fs.readFileSync(path.join(codexHome(), 'config.toml'), 'utf8').match(/^\s*model\s*=\s*"([^"]+)"/m) || [])[1] || null; } catch { return null; }
+  for (const home of codexHomes()) {
+    try {
+      const m = fs.readFileSync(path.join(home, 'config.toml'), 'utf8').match(/^\s*model\s*=\s*"([^"]+)"/m);
+      if (m) return m[1];
+    } catch {}
+  }
+  return null;
+}
+// For the local assistant's instructions: only providers that have an account.
+const hasEngine = (engine) => config.accounts.some((a) => a.engine === engine);
+function modelGuide() {
+  const lines = [];
+  if (hasEngine('claude')) lines.push(`- Claude Code models: ${CLAUDE_MODELS.map((m) => `"${m.id}" = ${m.label}, ${m.note}`).join('; ')}`);
+  if (hasEngine('codex')) lines.push(`- Codex models (newest first): ${codexModels().map((m) => `"${m.id}" = ${m.label}${m.id === codexDefaultModel() ? ' (the default)' : ''}`).join('; ') || '(list unavailable)'}`);
+  return lines.join('\n') || '- (no accounts yet)';
 }
 function allModels() {
   return [...CLAUDE_MODELS.map((m) => ({ ...m, engine: 'claude' })), ...codexModels().map((m) => ({ ...m, engine: 'codex' }))];
 }
 
 // How hard tasks work. Low: one agent, quickest path. Medium: one agent that checks
-// its own work. High: thorough, and the other model reviews the result.
+// its own work. High: thorough, and another provider reviews the result.
 const EFFORT = {
   low: { review: false, rounds: 8, note: 'Effort: LOW. Get the result the simplest, quickest way. One quick check is enough; skip extra polish and long verification.' },
   medium: { review: false, rounds: 20, note: 'Effort: MEDIUM. Do it properly but efficiently: check once that it works, and do not gold-plate.' },
-  high: { review: true, rounds: null, note: 'Effort: HIGH. Be thorough: test it, look at the result, and fix anything that is off before you say it is done. Another model will review your work.' },
+  high: { review: true, rounds: null, note: 'Effort: HIGH. Be thorough: test it, look at the result, and fix anything that is off before you say it is done. An agent from another provider may review your work.' },
 };
 const effortOf = (v) => (EFFORT[v] ? v : 'medium');
 const roundLimit = (task) => Math.min(config.maxRounds || 40, EFFORT[effortOf(task.effort)].rounds || Infinity);
@@ -697,6 +790,9 @@ function createTask(b) {
     model = allModels().find((m) => m.id === String(b.model).trim());
     if (!model) throw new Error(`Unknown model "${b.model}". Use one of: ${allModels().map((m) => m.id).join(', ')}.`);
   }
+  const wanted = b.prefer || 'auto';
+  const named = wanted.startsWith('account:') ? config.accounts.find((a) => a.name === wanted.slice(8)) : null;
+  if (wanted !== 'auto' && !named && !Object.hasOwn(PROVIDERS, wanted)) throw new Error(`Start with "auto", a provider, or "account:<name>". Got "${wanted}".`);
   const num = nextTaskNumber();
   const title = (b.title && b.title.trim()) || b.prompt.trim().split('\n')[0].slice(0, 70);
   const cwd = b.cwd && b.cwd.trim() ? b.cwd.trim() : newWorkspace(num, title);
@@ -707,9 +803,9 @@ function createTask(b) {
     chatId: b.chatId || null,
     title,
     prompt: b.prompt.trim(), cwd, effort, review: EFFORT[effort].review,
-    // A chosen model decides which engine starts the task.
+    // A chosen model decides which provider starts the task, unless the chosen account already fits it.
     model: model ? { id: model.id, label: model.label, engine: model.engine } : null,
-    prefer: model ? model.engine : (b.prefer || 'auto'),
+    prefer: model && named?.engine !== model.engine ? model.engine : wanted,
     status: 'queued', phase: 'work', rounds: 0, sessions: {}, inbox: [], events: [],
     created: Date.now(), updated: Date.now(),
   };
@@ -723,7 +819,7 @@ function createTask(b) {
 // ---------- chat: the local assistant you talk to ----------
 // Runs on this PC through Ollama, so it keeps working when every subscription
 // is out of usage. It looks at files and manages tasks through the tools
-// below; the heavy work goes to Claude Code / Codex as tasks.
+// below; the heavy work goes to the coding agents as tasks.
 
 const CHATS_FILE = path.join(DATA, 'chats.json');
 // Images the user attaches in chat.
@@ -922,12 +1018,12 @@ const brainTools = {
     },
   },
   start_task: {
-    description: 'Start a new task. Claude Code or Codex does the work unattended on this PC, keeps going until done, and switches between them when one runs out of usage. The prompt must be a complete, clear task description.',
+    description: 'Start a new task. A coding agent does the work unattended on this PC using one of the configured accounts, keeps going until done, and switches accounts when one runs out of usage. The prompt must be a complete, clear task description.',
     params: {
       prompt: ['string', 'Full task description: goal, what done looks like, how to check it, limits'],
       folder: ['string', 'Working folder (full path). Leave it out unless the task is about one of the known projects or the user named a folder; then the runner makes a fresh folder for the task.'],
-      prefer: ['string', 'claude, codex or auto (default auto). Use codex for clicking around the desktop.'],
-      model: ['string', `Only when the user's message names a model; never "claude" or "codex" (that is prefer). REQUIRED whenever the user's message names a model. Exact id, one of: ${CLAUDE_MODELS.map((m) => m.id).join(', ')} (Claude), ${codexModels().map((m) => `${m.id} (${m.label})`).join(', ')} (Codex/GPT). Examples: "astra" -> the newest astra id, "sol" -> the newest sol id, "sonnet 5.5" -> sonnet. Leave it out only when no model was named.`],
+      prefer: ['string', 'Only when the user asks for one: a provider (claude or codex) or "account:<account name>". Default auto.'],
+      model: ['string', 'Only when the user\'s message names a model, and REQUIRED then. Use an exact id from MODELS in your instructions; a provider name goes in prefer instead.'],
     },
     required: ['prompt'],
     run: ({ prompt, folder, prefer, model }) => {
@@ -992,12 +1088,12 @@ const brainTools = {
     description: 'Resume a stopped or failed task.',
     params: { id: ['string', 'Task id'] },
     required: ['id'],
-    run: ({ id }) => { const t = findTask(id); if (t.status !== 'running') { t.status = 'queued'; t.errors = 0; t.triedOther = false; if (t.rounds >= roundLimit(t)) t.rounds = 0; addEvent(t, 'Resumed by the assistant.'); } return 'Resumed ' + t.id; },
+    run: ({ id }) => { const t = findTask(id); if (t.status !== 'running') { t.status = 'queued'; t.errors = 0; t.failedAccounts = []; if (t.rounds >= roundLimit(t)) t.rounds = 0; addEvent(t, 'Resumed by the assistant.'); } return 'Resumed ' + t.id; },
   },
   accounts: {
-    description: 'Show whether Claude and Codex have usage left, and when they come back.',
+    description: 'Show every account, whether it has usage left, and when it comes back.',
     params: {},
-    run: () => accountsView().map((a) => `${a.name}: ${a.limitedUntil ? 'out of usage until ' + stamp(a.limitedUntil) : 'ready'}`).join('\n'),
+    run: () => accountsView().map((a) => `${a.name} (${a.provider}): ${!a.ready ? 'needs setup' : a.limitedUntil ? 'out of usage until ' + stamp(a.limitedUntil) : 'ready'}`).join('\n') || 'No accounts yet.',
   },
   find_files: {
     description: 'Search for files or folders by name. Returns full paths, newest first.',
@@ -1170,7 +1266,7 @@ This chat is "${chat ? chat.title : ''}". Tasks started in this chat: ${here.len
 FIRST, DECIDE: IS THIS REAL WORK? (the most important rule)
 Real work = anything that creates or changes files, code, scripts, plugins, game content, Roblox Studio places, animations, assets, music projects; any research; anything that takes more than a couple of minutes.
 Real work ALWAYS goes to start_task, in this same turn. You never do it yourself, not even the first step: don't explore the files, don't take screenshots to "get oriented", don't plan it out loud. The agent explores and figures out the details.
-The agents (Claude Code and Codex) are far more capable than you: they read and edit the whole project, run scripts and tests, and control Roblox Studio directly through its Studio tools (the open place, Workspace, scripts, animations, playtests), plus the desktop. Anything inside Roblox Studio is theirs.
+The coding agents are far more capable than you: they read and edit the whole project, run scripts and tests, and control Roblox Studio directly through its Studio tools (the open place, Workspace, scripts, animations, playtests), plus the desktop. Anything inside Roblox Studio is theirs.
 If a big request is a bit vague, start the task anyway: put everything the user said into the description, add your best reading of the goal, and let the agent decide the specifics. Don't ask the user first.
 Your own tools are only for quick things: answering questions, looking at the screen, opening or switching apps, one screenshot, finding a file, checking or steering tasks.
 
@@ -1183,17 +1279,15 @@ Ask a question only when one of these is true:
 3. You need something only the user knows (a password is never typed by you; ask the user to do that part).
 Before asking, look first: a screenshot, list_windows, list_tasks or find_files usually answers the question. If you do ask, ask one short question, after doing everything you can.
 
-Defaults (use them, don't ask): folder = leave it out, and the task gets a fresh folder of its own; only pass a project folder when the task is about a known project listed below or the user names a folder; model = auto; effort = this chat's setting (it decides how thorough tasks are and whether another model reviews them; don't ask about it); "the agents" = Claude Code / Codex tasks.
+Defaults (use them, don't ask): folder = leave it out, and the task gets a fresh folder of its own; only pass a project folder when the task is about a known project listed below or the user names a folder; model = auto; effort = this chat's setting (it decides how thorough tasks are and whether another provider reviews them; don't ask about it); "the agents" = coding tasks.
 
 IMAGES. The user can attach images; you see them, and their file paths are written next to the message. Look at them and answer about them directly; don't read the file paths out to the user unless they ask. When you start a task that involves an image (a reference, a screenshot of a bug, a mockup), put the image's full file path in the task description and say what it shows, so the agent can open it.
 
-MODELS. Use only model ids from the lists below. Whenever the user's message names a listed model, pass the matching exact id as start_task's "model" (it also decides whether Claude Code or Codex runs the task).
-- Claude Code models: ${CLAUDE_MODELS.map((m) => `"${m.id}" = ${m.label}, ${m.note}`).join('; ')}
-- Codex / GPT models (newest first): ${codexModels().map((m) => `"${m.id}" = ${m.label}${m.id === codexDefaultModel() ? ' (the default)' : ''}`).join('; ') || '(list unavailable)'}
-- Examples: "use astra" -> model "${(codexModels().find((m) => /astra/.test(m.id)) || {}).id || 'gpt-…-astra'}"; "with sol" -> "${(codexModels().find((m) => /sol/.test(m.id)) || {}).id || 'gpt-…-sol'}"; "sonnet 5.5" -> "sonnet"; "use opus" -> "opus".
+MODELS. Use only model ids from the lists below. Whenever the user's message names a listed model, pass the matching exact id as start_task's "model" (it also decides which provider runs the task). A short or partial name means the newest listed model that matches it.
+${modelGuide()}
 - In your reply, name the model the task uses. If a model id is rejected, the error lists the valid ids: pick from those.
 
-This chat's effort is ${chat ? effortOf(chat.effort).toUpperCase() : 'MEDIUM'} (the user sets it with the effort button). Low: quick, one agent, no review. Medium: one agent that checks its own work. High: thorough, and another model reviews the result. Match your own replies to it too: on low, keep things brief and fast.
+This chat's effort is ${chat ? effortOf(chat.effort).toUpperCase() : 'MEDIUM'} (the user sets it with the effort button). Low: quick, one agent, no review. Medium: one agent that checks its own work. High: thorough, and another provider reviews the result when one is available. Match your own replies to it too: on low, keep things brief and fast.
 
 Examples of the right behaviour:
 - "take a photo of FL Studio" → list_windows; if FL Studio is open, focus_window it, otherwise open "FL Studio" and wait; then screenshot. Reply: "Here's FL Studio." The screenshot already shows in the chat.
@@ -1204,7 +1298,7 @@ Examples of the right behaviour:
 
 What you do yourself vs. hand off:
 - Yourself (seconds to a few minutes): looking at the screen, opening and switching apps, clicking, typing, screenshots, finding files and folders, reading logs, answering questions, checking and steering tasks.
-- Hand off with start_task (long or deep work): coding, building, fixing, testing in Roblox Studio, making assets, research. Tasks run for hours, switch between Claude and Codex when one runs out of usage, and wait for resets. Write the task description in full: the goal, the folder, what "done" looks like, how to check it (tests, a Studio playtest, screenshots), and anything to avoid.
+- Hand off with start_task (long or deep work): coding, building, fixing, testing in Roblox Studio, making assets, research. Tasks run for hours, switch accounts when one runs out of usage, and wait for resets. Write the task description in full: the goal, the folder, what "done" looks like, how to check it (tests, a Studio playtest, screenshots), and anything to avoid.
 - Improving a prompt: rewrite it and show it; start it if the user said to, or use rewrite_task on an existing task.
 - Progress questions: list_tasks or show_task, then sum up in a few lines. Notes or corrections for a running task: message_task.
 
@@ -1485,7 +1579,7 @@ async function chatLoop() {
 setInterval(chatLoop, 5000);
 
 // Important task events also show up in the chat.
-const CHAT_WORTHY = /says the task is done|reviewed the work|asked for changes|needs you|Stopped after|Reached \d+ rounds|Every account is out|out of usage until|Switching from|Review skipped|Runner error/;
+const CHAT_WORTHY = /says the task is done|reviewed the work|asked for changes|needs you|Stopped after|Reached \d+ rounds|Every available account is out|out of usage until|Switching from|Review skipped|Runner error/;
 
 // ---------- web server ----------
 
@@ -1546,7 +1640,7 @@ function readBody(req) {
     try { body = JSON.parse(raw.toString('utf8') || '{}'); }
     catch { throw Object.assign(new Error('Request body must contain valid JSON.'), { status: 400 }); }
     if (!body || Array.isArray(body) || typeof body !== 'object') throw Object.assign(new Error('Request body must contain a JSON object.'), { status: 400 });
-    for (const key of ['prompt', 'title', 'text', 'cwd', 'prefer', 'model', 'effort', 'chatId']) {
+    for (const key of ['prompt', 'title', 'text', 'cwd', 'prefer', 'model', 'effort', 'chatId', 'name', 'engine']) {
       if (body[key] !== undefined && body[key] !== null && typeof body[key] !== 'string') throw Object.assign(new Error(`${key} must be a string.`), { status: 400 });
     }
     return body;
@@ -1591,7 +1685,7 @@ function accountIdentity(acc) {
   if (hit && Date.now() - hit.at < 30000) return hit.value;
   let value = null;
   try {
-    const env = { ...process.env, ...(acc.env || {}) };
+    const env = childEnv(acc);
     if (acc.engine === 'claude') {
       const dir = env.CLAUDE_CONFIG_DIR || process.env.USERPROFILE;
       const file = path.join(dir, '.claude.json');
@@ -1619,10 +1713,48 @@ function accountsView() {
   return config.accounts.map((a) => {
     const s = accountState[a.name] || {};
     const limited = s.limitedUntil && s.limitedUntil > Date.now();
-    return { name: a.name, engine: a.engine, ready: providerHealth.get(a.name)?.ready || false,
-      setupError: providerHealth.get(a.name)?.error || (!providersReady ? 'Checking provider sign-in…' : ''),
+    const health = providerHealth.get(a.name);
+    const working = tasks.find((t) => t.status === 'running' && t.activityAccount === a.name);
+    return { name: a.name, engine: a.engine, provider: PROVIDERS[a.engine].label, ready: health?.ready || false,
+      setupError: health ? health.error || '' : 'Checking provider sign-in…',
+      signInCommand: health?.signedOut ? accountsLib.signInCommand(a.name) : null,
+      working: working ? working.num : null,
       limitedUntil: limited ? s.limitedUntil : null, note: limited ? s.note : '', who: accountIdentity(a), usage: usageOf(a) };
   });
+}
+
+// The web page sends names, providers and positions only, never paths or environment values.
+async function accountsApi(req, res, parts) {
+  const [, , first, action] = parts;
+  try {
+    if (!first) {
+      const { engine, name, useExisting } = await readBody(req);
+      const account = accountsLib.addAccount(ROOT, { engine, name, useExisting: typeof useExisting === 'boolean' ? useExisting : undefined });
+      reloadAccounts();
+      return send(res, 200, { name: account.name });
+    }
+    if (first === 'check' && !action) {
+      reloadAccounts();
+      await Promise.all(config.accounts.map(checkAccount));
+      return send(res, 200, { ok: true });
+    }
+    const name = decodeURIComponent(first);
+    if (!config.accounts.some((a) => a.name === name)) return send(res, 404, { error: 'no such account' });
+    if (action === 'clear') {
+      if (accountState[name]) { delete accountState[name].limitedUntil; delete accountState[name].note; }
+      save();
+    } else if (action === 'remove') {
+      accountsLib.removeAccount(ROOT, name);
+      reloadAccounts();
+    } else if (action === 'move') {
+      const { position } = await readBody(req);
+      accountsLib.moveAccount(ROOT, name, position);
+      reloadAccounts();
+    } else return send(res, 404, { error: 'not found' });
+    return send(res, 200, { ok: true });
+  } catch (err) {
+    return send(res, err.status || 400, { error: err.message });
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1641,6 +1773,7 @@ const server = http.createServer(async (req, res) => {
         models: allModels().map(({ id, label, engine }) => ({ id, label, engine })),
         tasks: tasks.slice().sort((a, b) => b.created - a.created).map((t) => publicTask(t, false)),
         accounts: accountsView(),
+        providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, name: p.name, canUseExisting: !accountsLib.usesDefaultLogin(config.accounts, id) })),
         projects: config.projects || [],
         chats: chats.slice().sort((a, b) => b.updated - a.updated).map((c) => {
           const last = [...c.messages].reverse().find((m) => m.role === 'user' || m.role === 'assistant');
@@ -1678,7 +1811,7 @@ const server = http.createServer(async (req, res) => {
         if (t.status !== 'running') {
           t.status = 'queued';
           t.errors = 0;
-          t.triedOther = false;
+          t.failedAccounts = [];
           if (t.rounds >= roundLimit(t)) t.rounds = 0;
           addEvent(t, 'Resumed by you.');
         }
@@ -1802,12 +1935,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true });
       }
     }
-    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'accounts' && parts[3] === 'clear') {
-      const name = decodeURIComponent(parts[2]);
-      if (accountState[name]) { delete accountState[name].limitedUntil; delete accountState[name].note; }
-      save();
-      return send(res, 200, { ok: true });
-    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'accounts') return accountsApi(req, res, parts);
     if (req.method === 'GET' && parts[0] === 'screens' && parts.length === 2) {
       const name = path.basename(decodeURIComponent(parts[1]));
       const file = path.join(SCREENS, name);
@@ -1839,6 +1967,7 @@ server.on('error', (err) => {
 server.listen(config.port, '127.0.0.1', async () => {
   console.log(`Kuro is up: http://localhost:${config.port}`);
   console.log(config.remoteAccess ? `Authenticated phone access: ${config.publicOrigin}` : 'Localhost only. See README.md for authenticated phone access.');
+  syncAccounts();
   await checkProviders();
   seedClaudeUsage();
   tick();
